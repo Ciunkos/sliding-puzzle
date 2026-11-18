@@ -9,6 +9,7 @@ import {
   cpSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -18,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { after, before, describe, test } from 'node:test';
+import { assertIsolated, SELF_TEST_ENV } from './isolated-git.ts';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const GATE_FILES = [
@@ -33,8 +35,8 @@ const GATE_FILES = [
 const NESTED = process.env.GATES_SELF_TEST === '1';
 // NODE_TEST_CONTEXT is set by the test runner for its children. If the hooks inherited it, the
 // `node --test` they start would act as a nested child and stop failing through its exit code.
-const ENV: NodeJS.ProcessEnv = { ...process.env, GATES_SELF_TEST: '1' };
-delete ENV.NODE_TEST_CONTEXT;
+// Never the inherited environment: see isolated-git.ts for why.
+const ENV = SELF_TEST_ENV;
 
 let repo = '';
 
@@ -77,8 +79,10 @@ ${body}
 
 if (!NESTED) {
   before(() => {
-    repo = mkdtempSync(join(tmpdir(), 'gates-'));
-    execFileSync('git', ['clone', '-q', ROOT, repo]);
+    repo = realpathSync(mkdtempSync(join(tmpdir(), 'gates-')));
+    execFileSync('git', ['clone', '-q', ROOT, repo], { env: ENV });
+    // Before the first commit: git here must act on the clone and nothing else.
+    assertIsolated(repo, ENV);
     for (const path of GATE_FILES) cpSync(join(ROOT, path), join(repo, path), { recursive: true });
     symlinkSync(join(ROOT, 'node_modules'), join(repo, 'node_modules'));
     git('config', 'user.email', 'gates@example.test');
@@ -180,7 +184,7 @@ if (!NESTED) {
   describe('pre-push', () => {
     test('refuses to push a failing unit test', () => {
       const remote = mkdtempSync(join(tmpdir(), 'gates-remote-'));
-      execFileSync('git', ['init', '-q', '--bare', remote]);
+      execFileSync('git', ['init', '-q', '--bare', remote], { env: ENV });
       git('remote', 'add', 'selftest', remote);
       const committed = commit(
         testFile("  assert.equal(GREETING, 'goodbye');"),
