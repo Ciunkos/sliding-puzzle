@@ -1,5 +1,6 @@
+// Browser API client for the routes of one game. Pure over an injected fetch; responses are zod-parsed.
 import { z } from 'zod';
-import { gameStateSchema, type GameState } from './index.ts';
+import { type GameDefinition, type SavedGame, savedGameSchema } from './index.ts';
 
 export class GameApiError extends Error {
   readonly status: number;
@@ -11,10 +12,40 @@ export class GameApiError extends Error {
   }
 }
 
+export interface GameApi<State, Move, Options> {
+  /** The saved game, or undefined when the profile has none. */
+  load(nickname: string): Promise<SavedGame<State> | undefined>;
+  start(nickname: string, options: Options): Promise<SavedGame<State>>;
+  move(nickname: string, move: Move): Promise<SavedGame<State>>;
+  reset(nickname: string): Promise<SavedGame<State>>;
+}
+
 const errorBody = z.object({ error: z.string() });
 
-export function createGameApi(fetchImpl: typeof fetch = fetch) {
-  const base = (nickname: string) => `/api/profiles/${encodeURIComponent(nickname)}/game`;
+async function failure(res: Response): Promise<GameApiError> {
+  const body: unknown = await res.json().catch(() => undefined);
+  const parsed = errorBody.safeParse(body);
+  const message = parsed.success
+    ? parsed.data.error
+    : `Request failed with status ${String(res.status)}`;
+  return new GameApiError(message, res.status);
+}
+
+function postJson(body: unknown): RequestInit {
+  return {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+}
+
+export function createGameApi<State, Move, Options>(
+  definition: GameDefinition<State, Move, Options>,
+  fetchImpl: typeof fetch = fetch,
+): GameApi<State, Move, Options> {
+  const schema = savedGameSchema(definition.stateSchema);
+  const base = (nickname: string) =>
+    `/api/profiles/${encodeURIComponent(nickname)}/games/${encodeURIComponent(definition.id)}`;
 
   async function send(url: string, init?: RequestInit): Promise<Response> {
     try {
@@ -24,54 +55,22 @@ export function createGameApi(fetchImpl: typeof fetch = fetch) {
     }
   }
 
-  async function fail(res: Response): Promise<never> {
-    const body: unknown = await res.json().catch(() => undefined);
-    const parsed = errorBody.safeParse(body);
-    const message = parsed.success
-      ? parsed.data.error
-      : `Request failed with status ${String(res.status)}`;
-    throw new GameApiError(message, res.status);
-  }
-
-  async function readState(res: Response): Promise<GameState> {
-    const body: unknown = await res.json().catch(() => undefined);
-    const parsed = gameStateSchema.safeParse(body);
-    if (!parsed.success) {
-      throw new GameApiError('Unexpected response from the server', res.status);
-    }
+  async function expectGame(res: Response): Promise<SavedGame<State>> {
+    if (!res.ok) throw await failure(res);
+    const parsed = schema.safeParse(await res.json().catch(() => undefined));
+    if (!parsed.success) throw new GameApiError('Unexpected response from the server', res.status);
     return parsed.data;
   }
 
-  async function expectState(res: Response): Promise<GameState> {
-    if (!res.ok) await fail(res);
-    return readState(res);
-  }
-
   return {
-    async load(nickname: string): Promise<GameState | undefined> {
+    async load(nickname) {
       const res = await send(base(nickname));
-      if (res.status === 404) return undefined;
-      return expectState(res);
+      return res.status === 404 ? undefined : expectGame(res);
     },
-
-    async start(nickname: string): Promise<GameState> {
-      return expectState(await send(base(nickname), { method: 'POST' }));
-    },
-
-    async move(nickname: string, tile: number): Promise<GameState> {
-      return expectState(
-        await send(`${base(nickname)}/move`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ tile }),
-        }),
-      );
-    },
-
-    async reset(nickname: string): Promise<GameState> {
-      return expectState(await send(`${base(nickname)}/reset`, { method: 'POST' }));
-    },
+    start: async (nickname, options) => expectGame(await send(base(nickname), postJson(options))),
+    move: async (nickname, move) =>
+      expectGame(await send(`${base(nickname)}/move`, postJson(move))),
+    reset: async (nickname) =>
+      expectGame(await send(`${base(nickname)}/reset`, { method: 'POST' })),
   };
 }
-
-export type GameApi = ReturnType<typeof createGameApi>;

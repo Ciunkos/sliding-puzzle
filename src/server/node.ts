@@ -8,6 +8,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { createNodeSqliteDb, migrate } from '../db/server.ts';
 import { createApp } from './create-app.ts';
+import { features } from './features.ts';
 
 const MIGRATIONS_DIR = fileURLToPath(new URL('../../migrations', import.meta.url));
 /** Relative to the working directory, where `npm run build` writes the web app. */
@@ -37,7 +38,13 @@ export async function start(): Promise<ServerType> {
   const db = createNodeSqliteDb(env.DB_PATH);
   await migrate(db, MIGRATIONS_DIR);
 
-  const api = createApp({ db, enableTestRoutes: env.ENABLE_TEST_ROUTES === '1' });
+  const api = createApp({
+    db,
+    features,
+    random: Math.random,
+    now: () => new Date(),
+    enableTestRoutes: env.ENABLE_TEST_ROUTES === '1',
+  });
   const web = webApp();
 
   const fetch = (request: Request): Response | Promise<Response> => {

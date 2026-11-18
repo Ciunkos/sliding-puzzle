@@ -1,6 +1,13 @@
-import { useState, type ReactElement } from 'react';
-import { GameView } from '../game/client.tsx';
+import { type ReactElement, useState } from 'react';
 import { ProfilePicker } from '../profile/client.tsx';
+import { features } from './features.tsx';
+
+/** The installed game. One feature today; a game picker comes when there is a second one. */
+function GameScreen({ nickname }: { nickname: string }): ReactElement {
+  const [feature] = features;
+  if (feature === undefined) return <p data-testid="no-games">No games installed</p>;
+  return <feature.Screen nickname={nickname} />;
+}
 
 /** Shell: pick a profile, then play. Each feature owns its own UI and API calls. */
 export function App(): ReactElement {
@@ -29,7 +36,7 @@ export function App(): ReactElement {
               Switch profile
             </button>
           </p>
-          <GameView nickname={nickname} />
+          <GameScreen nickname={nickname} />
         </>
       )}
     </main>

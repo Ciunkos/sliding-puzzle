@@ -46,7 +46,7 @@ function toProfile(row: Row): Profile {
   });
 }
 
-export function createProfileService(db: Db, now: () => Date = () => new Date()): ProfileService {
+export function createProfileService(db: Db, now: () => Date): ProfileService {
   async function selectByKey(key: string): Promise<Profile | undefined> {
     const row = await db.get(
       'SELECT id, nickname, created_at FROM profiles WHERE nickname_key = ?',

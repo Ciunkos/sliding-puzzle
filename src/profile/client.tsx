@@ -1,14 +1,11 @@
-// Client entry: the profile picker. Logic lives in api.ts, last-profile.ts and form.ts; this stays presentational.
-import { type ReactElement, type SyntheticEvent, useId, useMemo, useState } from 'react';
-import { createProfileApi, ProfileApiError } from './api.ts';
-import { loadLastNickname, saveLastNickname } from './last-profile.ts';
+// Client entry: the profile picker. Logic lives in api.ts, last-profile.ts, form.ts and
+// use-profile-form.ts; this stays presentational.
+import { type ReactElement, useId } from 'react';
+import { createProfileApi } from './api.ts';
 import type { Profile } from './index.ts';
-import { validateNickname } from './form.ts';
+import { type ProfileForm, useProfileForm } from './use-profile-form.ts';
 
-export { createProfileApi, ProfileApiError } from './api.ts';
-export { loadLastNickname, saveLastNickname } from './last-profile.ts';
-
-const GENERIC_MESSAGE = 'Could not reach the server';
+const api = createProfileApi();
 
 const styles = {
   form: { display: 'flex', flexDirection: 'column', gap: '0.5rem', maxWidth: '20rem' },
@@ -17,67 +14,46 @@ const styles = {
   error: { color: '#b00020', margin: 0 },
 } as const;
 
-export function ProfilePicker(props: {
-  onSelected: (profile: Profile) => void;
-  api?: ReturnType<typeof createProfileApi>;
-}): ReactElement {
-  const { onSelected, api } = props;
-  const client = useMemo(() => api ?? createProfileApi(), [api]);
+function NicknameField({ form }: { form: ProfileForm }): ReactElement {
   const inputId = useId();
-  const [value, setValue] = useState<string>(() => loadLastNickname() ?? '');
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
+  return (
+    <>
+      <label htmlFor={inputId}>Nickname</label>
+      <input
+        id={inputId}
+        data-testid="nickname-input"
+        style={styles.input}
+        type="text"
+        autoComplete="nickname"
+        value={form.value}
+        disabled={form.busy}
+        aria-invalid={form.error !== undefined}
+        onChange={(event) => {
+          form.setValue(event.target.value);
+        }}
+      />
+    </>
+  );
+}
 
-  async function submit(event: SyntheticEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const checked = validateNickname(value);
-    if (!checked.ok) {
-      setError(checked.message);
-      return;
-    }
-    setBusy(true);
-    setError(undefined);
-    try {
-      const profile = await client.selectOrCreate(checked.nickname);
-      saveLastNickname(checked.nickname);
-      onSelected(profile);
-    } catch (err: unknown) {
-      setError(err instanceof ProfileApiError ? err.message : GENERIC_MESSAGE);
-    } finally {
-      setBusy(false);
-    }
-  }
-
+export function ProfilePicker(props: { onSelected: (profile: Profile) => void }): ReactElement {
+  const form = useProfileForm(api, props.onSelected);
   return (
     <section>
       <h2>Who is playing?</h2>
-      <form
-        style={styles.form}
-        onSubmit={(event) => {
-          void submit(event);
-        }}
-        noValidate
-      >
-        <label htmlFor={inputId}>Nickname</label>
-        <input
-          id={inputId}
-          data-testid="nickname-input"
-          style={styles.input}
-          type="text"
-          autoComplete="nickname"
-          value={value}
-          disabled={busy}
-          aria-invalid={error !== undefined}
-          onChange={(event) => {
-            setValue(event.target.value);
-          }}
-        />
-        <button type="submit" data-testid="profile-submit" style={styles.button} disabled={busy}>
+      <form style={styles.form} onSubmit={form.submit} noValidate>
+        <NicknameField form={form} />
+        <button
+          type="submit"
+          data-testid="profile-submit"
+          style={styles.button}
+          disabled={form.busy}
+        >
           Play
         </button>
-        {error !== undefined ? (
+        {form.error !== undefined ? (
           <p role="alert" data-testid="profile-error" style={styles.error}>
-            {error}
+            {form.error}
           </p>
         ) : null}
       </form>

@@ -1,12 +1,18 @@
+// Isomorphic entry: the puzzle rules and its game definition.
 export {
-  SIZE,
-  SOLVED_BOARD,
+  type PuzzleMove,
+  type PuzzleOptions,
+  type PuzzleState,
+  puzzleDefinition,
+} from './definition.ts';
+export {
   applyMove,
+  type Board,
   isSolvable,
   isSolved,
   isValidBoard,
   legalMoves,
-  type Board,
-} from './board.ts';
-export { createRng, type Rng } from './rng.ts';
+  SIZE,
+  SOLVED_BOARD,
+} from './rules.ts';
 export { shuffle } from './shuffle.ts';

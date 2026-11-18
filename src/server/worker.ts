@@ -2,6 +2,7 @@
 // Never import ../db/server.ts in this file: it pulls in node:sqlite, which Workers do not have.
 import { createD1Db, type D1Like } from '../db/index.ts';
 import { createApp } from './create-app.ts';
+import { features } from './features.ts';
 
 interface Env {
   DB: D1Like;
@@ -10,7 +11,12 @@ interface Env {
 export default {
   fetch(request: Request, env: Env): Promise<Response> {
     // Cheap to build per request. Test routes are never enabled in the Worker.
-    const app = createApp({ db: createD1Db(env.DB) });
+    const app = createApp({
+      db: createD1Db(env.DB),
+      features,
+      random: Math.random,
+      now: () => new Date(),
+    });
     return Promise.resolve(app.fetch(request));
   },
 };

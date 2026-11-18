@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRng, isSolvable, isSolved, isValidBoard, shuffle, type Board } from './index.ts';
+import { createRng } from './rng.ts';
+import { isSolvable, isSolved, isValidBoard, type Board } from './rules.ts';
+import { shuffle } from './shuffle.ts';
 
 test('createRng is deterministic for the same seed', () => {
   const a = createRng(12345);
@@ -36,11 +38,4 @@ test('shuffle with different seeds produces more than one distinct board', () =>
   const boards = new Set<string>();
   for (let seed = 1; seed <= 20; seed++) boards.add(shuffle(createRng(seed)).join(','));
   assert.ok(boards.size > 1);
-});
-
-test('shuffle without an rng argument returns a valid, solvable, unsolved board', () => {
-  const board = shuffle();
-  assert.equal(isValidBoard(board), true);
-  assert.equal(isSolvable(board), true);
-  assert.equal(isSolved(board), false);
 });

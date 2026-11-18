@@ -13,23 +13,38 @@ function plain(row: Record<string, unknown>): Row {
   return { ...row };
 }
 
-export function createNodeSqliteDb(path: string): Db {
+function open(path: string): DatabaseSync {
   const sqlite = new DatabaseSync(path);
   sqlite.exec('PRAGMA foreign_keys = ON');
   if (path !== ':memory:') {
     sqlite.exec('PRAGMA journal_mode = WAL');
   }
+  return sqlite;
+}
 
-  function bindAll(statement: Statement): void {
-    sqlite.prepare(statement.sql).run(...(statement.params ?? []));
+/** Runs every statement in one transaction. node:sqlite is synchronous, so nothing can interleave. */
+function runBatch(sqlite: DatabaseSync, statements: readonly Statement[]): void {
+  sqlite.exec('BEGIN');
+  try {
+    for (const statement of statements) {
+      sqlite.prepare(statement.sql).run(...(statement.params ?? []));
+    }
+    sqlite.exec('COMMIT');
+  } catch (error) {
+    // SQLite may already have ended the transaction on some errors (e.g. SQLITE_FULL).
+    if (sqlite.isTransaction) {
+      sqlite.exec('ROLLBACK');
+    }
+    throw error;
   }
+}
+
+export function createNodeSqliteDb(path: string): Db {
+  const sqlite = open(path);
 
   return {
     run(sql: string, params: readonly SqlParam[] = []) {
-      return attempt(() => {
-        const result = sqlite.prepare(sql).run(...params);
-        return { changes: Number(result.changes) };
-      });
+      return attempt(() => ({ changes: Number(sqlite.prepare(sql).run(...params).changes) }));
     },
     all(sql: string, params: readonly SqlParam[] = []) {
       return attempt(() =>
@@ -46,21 +61,8 @@ export function createNodeSqliteDb(path: string): Db {
       });
     },
     batch(statements: readonly Statement[]) {
-      // node:sqlite is synchronous, so nothing else can interleave with this transaction.
       return attempt(() => {
-        sqlite.exec('BEGIN');
-        try {
-          for (const statement of statements) {
-            bindAll(statement);
-          }
-          sqlite.exec('COMMIT');
-        } catch (error) {
-          // SQLite may already have ended the transaction on some errors (e.g. SQLITE_FULL).
-          if (sqlite.isTransaction) {
-            sqlite.exec('ROLLBACK');
-          }
-          throw error;
-        }
+        runBatch(sqlite, statements);
       });
     },
   };

@@ -8,15 +8,15 @@ const MAX_TILE = CELLS - 1;
 
 export const SOLVED_BOARD: Board = [...Array.from({ length: MAX_TILE }, (_, i) => i + 1), BLANK];
 
+function isTile(cell: unknown): cell is number {
+  return typeof cell === 'number' && Number.isInteger(cell) && cell >= 0 && cell <= MAX_TILE;
+}
+
+/** Exactly CELLS cells, each tile 0..MAX_TILE appearing once. */
 export function isValidBoard(value: unknown): value is Board {
   if (!Array.isArray(value) || value.length !== CELLS) return false;
-  const seen = new Array<boolean>(CELLS).fill(false);
-  for (const cell of value as unknown[]) {
-    if (typeof cell !== 'number' || !Number.isInteger(cell)) return false;
-    if (cell < 0 || cell > MAX_TILE || seen[cell]) return false;
-    seen[cell] = true;
-  }
-  return true;
+  const cells: unknown[] = value;
+  return cells.every(isTile) && new Set(cells).size === CELLS;
 }
 
 export function isSolved(board: Board): boolean {

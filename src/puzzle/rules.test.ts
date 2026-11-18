@@ -9,7 +9,7 @@ import {
   isValidBoard,
   legalMoves,
   type Board,
-} from './index.ts';
+} from './rules.ts';
 
 /** Board with tiles 1..15 in order and the blank at `blank`. */
 function withBlankAt(blank: number): Board {
