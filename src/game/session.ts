@@ -1,55 +1,26 @@
-// Plain logic behind useGameSession: one request at a time with busy/error state.
-import { GameApiError, StaleGameError } from './api.ts';
-import type { SavedGame } from './index.ts';
+// What a game session tells the player, and how its requests end.
+import { GameApiError } from './api.ts';
 
-/** Shown when a request was made on an outdated game and the session adopted the server's game. */
-const STALE_NOTICE = 'This game changed somewhere else. Showing the latest.';
+/** What the player is told about the sync state of the game on screen. */
+export const NOTICES = {
+  /** The session adopted the server's game: it changed somewhere else. */
+  'server-newer': 'This game changed somewhere else. Showing the latest.',
+  offline: 'You are offline. Your moves will be saved when you are back.',
+} as const;
+
+/** Shown when the server refused queued moves for good: they were dropped. */
+export const COULD_NOT_SAVE = 'These moves could not be saved.';
 
 export function errorMessage(error: unknown): string {
   return error instanceof GameApiError ? error.message : 'Something went wrong. Try again.';
 }
 
-/** A stale request adopts the server's current game; any other failure shows its message. */
-function showFailure<State>(target: SessionTarget<State>, failure: unknown): void {
-  if (failure instanceof StaleGameError) {
-    // The API client parsed this game with the same definition's state schema.
-    target.setGame(failure.game as SavedGame<State>);
-    target.setMessage(STALE_NOTICE);
-    return;
-  }
-  target.setMessage(errorMessage(failure));
-}
+export type Settled<T> = { ok: true; value: T } | { ok: false; error: unknown };
 
-export interface SessionTarget<State> {
-  setGame: (game: SavedGame<State>) => void;
-  setMessage: (message: string | undefined) => void;
-  setBusy: (busy: boolean) => void;
-  /** Synchronous guard: a click that lands before React re-renders must still be ignored. */
-  inFlight: { current: boolean };
-}
-
-/**
- * Runs one request: marks the session busy, then stores the game or the error message. `isLive`
- * turns false when the session moved on (another nickname), so a late response is ignored.
- */
-export async function runRequest<State>(
-  target: SessionTarget<State>,
-  isLive: () => boolean,
-  request: () => Promise<SavedGame<State>>,
-): Promise<void> {
-  target.inFlight.current = true;
-  target.setBusy(true);
-  target.setMessage(undefined);
-  const settle = await request().then(
-    (game) => () => {
-      target.setGame(game);
-    },
-    (failure: unknown) => () => {
-      showFailure(target, failure);
-    },
+/** How `promise` ended, as a value: a request's failure is an answer like any other. */
+export function settle<T>(promise: Promise<T>): Promise<Settled<T>> {
+  return promise.then(
+    (value) => ({ ok: true, value }),
+    (error: unknown) => ({ ok: false, error }),
   );
-  if (!isLive()) return;
-  settle();
-  target.inFlight.current = false;
-  target.setBusy(false);
 }

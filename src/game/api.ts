@@ -40,8 +40,6 @@ export interface GameApi<State, Move, Options> {
   resume(nickname: string, options: Options): Promise<SavedGame<State>>;
   /** A new game, replacing any existing one. */
   start(nickname: string, options: Options): Promise<SavedGame<State>>;
-  /** Rejects with StaleGameError when the game is no longer at `baseVersion`. */
-  move(nickname: string, move: Move, baseVersion: number): Promise<SavedGame<State>>;
   /** Rejects with StaleGameError (carrying the server's game) when the server refuses the batch. */
   sendMoves(nickname: string, request: MovesRequest<Move>): Promise<SavedGame<State>>;
   reset(nickname: string, baseVersion: number): Promise<SavedGame<State>>;
@@ -80,6 +78,8 @@ export function createGameApi<State, Move, Options>(
   /** Where the API is mounted, e.g. /sliding-puzzle/api; injected by the web composition root. */
   apiBase: string,
   fetchImpl: typeof fetch = fetch,
+  /** A request without an answer by then is given up, like an unreachable server. */
+  timeoutMs = 10_000,
 ): GameApi<State, Move, Options> {
   const schema = savedGameSchema(definition.stateSchema);
   const base = (nickname: string) =>
@@ -88,7 +88,7 @@ export function createGameApi<State, Move, Options>(
   async function request<T>(url: string, init: RequestInit, answer: z.ZodType<T>): Promise<T> {
     let res: Response;
     try {
-      res = await fetchImpl(url, init);
+      res = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(timeoutMs) });
     } catch {
       throw new GameApiError('Could not reach the server', 0);
     }
@@ -104,8 +104,6 @@ export function createGameApi<State, Move, Options>(
     definition,
     resume: (nickname, options) => send(base(nickname), sendJson('PUT', options)),
     start: (nickname, options) => send(base(nickname), sendJson('POST', options)),
-    move: (nickname, move, baseVersion) =>
-      send(`${base(nickname)}/move`, sendJson('POST', { baseVersion, move })),
     sendMoves: (nickname, moves) => send(`${base(nickname)}/moves`, sendJson('POST', moves)),
     reset: (nickname, baseVersion) =>
       send(`${base(nickname)}/reset`, sendJson('POST', { baseVersion })),

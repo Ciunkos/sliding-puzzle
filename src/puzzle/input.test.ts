@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { grid } from '../test-support/grid.ts';
-import { keyDirection, movable, swipeDirection, tileForDirection } from './input.ts';
+import { keyDirection, movable, swipeDirection, tabStopTile, tileForDirection } from './input.ts';
+
+/** A key pressed without Ctrl, Cmd or Alt. */
+function plain(key: string) {
+  return { key, ctrlKey: false, metaKey: false, altKey: false };
+}
 
 /** The blank in the middle: 2 is above it, 8 below, 4 to its left, 6 to its right. */
 const BLANK_IN_THE_MIDDLE = grid`
@@ -65,18 +70,28 @@ describe('tileForDirection', () => {
 describe('keyDirection', () => {
   test('the arrow keys name their direction', () => {
     const keys = [
-      keyDirection('ArrowUp'),
-      keyDirection('ArrowDown'),
-      keyDirection('ArrowLeft'),
-      keyDirection('ArrowRight'),
+      keyDirection(plain('ArrowUp')),
+      keyDirection(plain('ArrowDown')),
+      keyDirection(plain('ArrowLeft')),
+      keyDirection(plain('ArrowRight')),
     ];
 
     assert.deepEqual(keys, ['up', 'down', 'left', 'right']);
   });
 
   test('W, A, S and D name the same directions in either case', () => {
-    const lower = [keyDirection('w'), keyDirection('a'), keyDirection('s'), keyDirection('d')];
-    const upper = [keyDirection('W'), keyDirection('A'), keyDirection('S'), keyDirection('D')];
+    const lower = [
+      keyDirection(plain('w')),
+      keyDirection(plain('a')),
+      keyDirection(plain('s')),
+      keyDirection(plain('d')),
+    ];
+    const upper = [
+      keyDirection(plain('W')),
+      keyDirection(plain('A')),
+      keyDirection(plain('S')),
+      keyDirection(plain('D')),
+    ];
 
     assert.deepEqual(lower, ['up', 'left', 'down', 'right']);
     assert.deepEqual(upper, ['up', 'left', 'down', 'right']);
@@ -84,10 +99,46 @@ describe('keyDirection', () => {
 
   test('other keys, and names of object properties, name no direction', () => {
     assert.deepEqual(
-      [keyDirection('Enter'), keyDirection(' '), keyDirection('x')],
+      [keyDirection(plain('Enter')), keyDirection(plain(' ')), keyDirection(plain('x'))],
       [undefined, undefined, undefined],
     );
-    assert.equal(keyDirection('constructor'), undefined);
+    assert.equal(keyDirection(plain('constructor')), undefined);
+  });
+});
+
+describe('keyDirection with modifier keys', () => {
+  test('with Ctrl, Cmd or Alt held a key is a shortcut, not a move', () => {
+    const shortcuts = [
+      keyDirection({ key: 's', ctrlKey: true, metaKey: false, altKey: false }),
+      keyDirection({ key: 'a', ctrlKey: false, metaKey: true, altKey: false }),
+      keyDirection({ key: 'ArrowLeft', ctrlKey: false, metaKey: false, altKey: true }),
+    ];
+
+    assert.deepEqual(shortcuts, [undefined, undefined, undefined]);
+  });
+
+  test('Shift alone does not stop a move: Shift+S is down', () => {
+    assert.equal(keyDirection(plain('S')), 'down');
+  });
+});
+
+describe('tabStopTile', () => {
+  test('the tile that moved or had focus last holds the tab stop', () => {
+    assert.equal(tabStopTile(BLANK_IN_THE_MIDDLE, false, 7), 7);
+  });
+
+  test('without one the lowest-numbered tile that can move holds it', () => {
+    assert.equal(tabStopTile(BLANK_IN_THE_MIDDLE, false, undefined), 2);
+  });
+
+  test('a number that is not a tile here, or a finished game, falls back to the lowest tile that fits', () => {
+    // Given 9 (not on a 3x3 board) and 0 (the blank)
+    assert.deepEqual(
+      [tabStopTile(BLANK_IN_THE_MIDDLE, false, 9), tabStopTile(BLANK_IN_THE_MIDDLE, false, 0)],
+      [2, 2],
+    );
+    // Then in a finished game no tile can move, so tile 1 holds it
+    assert.equal(tabStopTile(BLANK_IN_THE_MIDDLE, true, undefined), 1);
   });
 });
 

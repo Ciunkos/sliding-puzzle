@@ -45,9 +45,22 @@ const KEYS: ReadonlyMap<string, Direction> = new Map([
   ['D', 'right'],
 ]);
 
-/** The direction of an arrow key or of W/A/S/D (`KeyboardEvent.key`), otherwise undefined. */
-export function keyDirection(key: string): Direction | undefined {
-  return KEYS.get(key);
+/** What a key press needs to say: the key and whether Ctrl, Cmd (meta) or Alt is held. */
+export interface KeyPress {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+}
+
+/**
+ * The direction of an arrow key or of W/A/S/D (`KeyboardEvent.key`), otherwise undefined. With
+ * Ctrl, Cmd or Alt held the key belongs to a shortcut (Ctrl+S, Cmd+A, Alt+Left), so it moves
+ * nothing; Shift alone is fine.
+ */
+export function keyDirection(press: KeyPress): Direction | undefined {
+  if (press.ctrlKey || press.metaKey || press.altKey) return undefined;
+  return KEYS.get(press.key);
 }
 
 /** The shortest movement, in CSS pixels, that counts as a swipe rather than a tap. */
@@ -73,4 +86,20 @@ export function movable(
 ): number | undefined {
   if (finished) return undefined;
   return legalMoves(board).find((legal) => legal === tile);
+}
+
+/**
+ * The tile that holds the board's one tab stop (roving tabindex): `preferred` (the tile that moved
+ * or had focus last) when it is a tile of this board, else the lowest-numbered tile that can move,
+ * else tile 1 (a finished game).
+ */
+export function tabStopTile(
+  board: Board,
+  finished: boolean,
+  preferred: number | undefined,
+): number {
+  const kept = board.find((cell) => cell !== 0 && cell === preferred);
+  if (kept !== undefined) return kept;
+  const [lowest] = finished ? [] : legalMoves(board);
+  return lowest ?? 1;
 }

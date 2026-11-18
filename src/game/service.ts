@@ -21,16 +21,18 @@ import {
   upsertGame,
 } from './store.ts';
 
-export type GameFailure = 'no-game' | 'illegal-move' | 'already-finished';
+/** Why a request that found a game changed nothing. */
+export type GameFailure = 'stale' | 'illegal-move' | 'already-finished';
 
 /**
- * `stale`: the request was made on another version than the stored one (a duplicate request, a
- * second tab, a game replaced meanwhile). Nothing changed; `game` is the stored game to adopt.
+ * The answer to a batch or a reset. `stale`: it was made on another version than the stored one (a
+ * second tab, a game replaced meanwhile). Every failure but no-game carries the stored game: nothing
+ * changed, and the server's game wins.
  */
 export type GameResult<State> =
   | { ok: true; game: SavedGame<State> }
-  | { ok: false; reason: GameFailure }
-  | { ok: false; reason: 'stale'; game: SavedGame<State> };
+  | { ok: false; reason: 'no-game' }
+  | { ok: false; reason: GameFailure; game: SavedGame<State> };
 
 /** Moves the browser applied optimistically on the game at `baseVersion`, sent together. */
 export interface MoveBatch<Move> {
@@ -41,12 +43,6 @@ export interface MoveBatch<Move> {
   /** Active play time the browser measured; used only when the batch finishes the game. */
   elapsedMs?: number;
 }
-
-/** Every failure but no-game carries the stored game: the server's game wins. */
-export type BatchResult<State> =
-  | { ok: true; game: SavedGame<State> }
-  | { ok: false; reason: 'no-game' }
-  | { ok: false; reason: 'stale' | 'illegal-move' | 'already-finished'; game: SavedGame<State> };
 
 export interface Resumed<State> {
   game: SavedGame<State>;
@@ -68,9 +64,7 @@ export interface GameService<State, Move, Options> {
    * stale, unless the stored game's last batch is this very batch: then it is a replay of a batch
    * whose answer was lost, and the answer is the stored game.
    */
-  applyMoves(profileId: number, batch: MoveBatch<Move>): Promise<BatchResult<State>>;
-  /** One move on the game at `baseVersion`: a batch of one that can never count as a replay. */
-  move(profileId: number, move: Move, baseVersion: number): Promise<GameResult<State>>;
+  applyMoves(profileId: number, batch: MoveBatch<Move>): Promise<GameResult<State>>;
   /** Resets the game at `baseVersion` back to its initial state, starting its clock again. */
   reset(profileId: number, baseVersion: number): Promise<GameResult<State>>;
   /** The profile's best results per variant: fewest moves, then shortest time; top 5 each. */
@@ -153,9 +147,13 @@ function batchStep<State, Move>(
   };
 }
 
-/** The step of a reset: back to the initial state, no moves, and the clock starts again now. */
+/**
+ * The step of a reset: back to the initial state, no moves, and the clock starts again now. A
+ * finished game is refused: replaying a known solution must not give a better result.
+ */
 function resetStep<State>(definition: GameDefinition<State, unknown, unknown>): Step<State> {
   return (current, now) => {
+    if (current.finished) return { ok: false, reason: 'already-finished' };
     const finished = definition.isFinished(current.initial);
     const at = now.toISOString();
     const game = {
@@ -190,7 +188,7 @@ interface Write<State> {
 }
 
 /** The answer to a write made on another version: a replay of the last batch, or stale. */
-function notCurrent<State>(stored: StoredGame<State>, batchId: string | null): BatchResult<State> {
+function notCurrent<State>(stored: StoredGame<State>, batchId: string | null): GameResult<State> {
   if (batchId !== null && stored.lastBatchId === batchId) return { ok: true, game: stored.game };
   return { ok: false, reason: 'stale', game: stored.game };
 }
@@ -205,7 +203,7 @@ async function mutate<State>(
   engine: Engine<State, unknown, unknown>,
   profileId: number,
   write: Write<State>,
-): Promise<BatchResult<State>> {
+): Promise<GameResult<State>> {
   const key = keyOf(engine, profileId);
   const stored = await readStoredGame(engine.db, key, engine.schema);
   if (stored === undefined) return { ok: false, reason: 'no-game' };
@@ -224,12 +222,6 @@ async function mutate<State>(
   if (await saveIfVersion(engine.db, key, swap)) return { ok: true, game: outcome.game };
   const latest = await readExistingGame(engine.db, key, engine.schema);
   return { ok: false, reason: 'stale', game: latest };
-}
-
-/** A batch answer as a single-move answer: illegal and finished carry no game there. */
-function single<State>(result: BatchResult<State>): GameResult<State> {
-  if (result.ok || result.reason === 'stale') return result;
-  return { ok: false, reason: result.reason };
 }
 
 /** A game that starts at `state` now: no moves, finished only if `state` already is. */
@@ -303,22 +295,8 @@ export function createGameService<State, Move, Options>(
     },
     applyMoves: (profileId, { baseVersion, batchId, ...batch }) =>
       mutate(engine, profileId, { baseVersion, batchId, step: movesStep(batch) }),
-    move: async (profileId, move, baseVersion) =>
-      single(
-        await mutate(engine, profileId, {
-          baseVersion,
-          batchId: null,
-          step: movesStep({ moves: [move] }),
-        }),
-      ),
-    reset: async (profileId, baseVersion) =>
-      single(
-        await mutate(engine, profileId, {
-          baseVersion,
-          batchId: null,
-          step: resetStep(definition),
-        }),
-      ),
+    reset: (profileId, baseVersion) =>
+      mutate(engine, profileId, { baseVersion, batchId: null, step: resetStep(definition) }),
     results: (profileId) => bestResults(db, keyOf(engine, profileId), RESULTS_PER_VARIANT),
   };
 }

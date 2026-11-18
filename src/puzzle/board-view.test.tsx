@@ -44,28 +44,28 @@ function markup(game: SavedGame<PuzzleState>): string {
 const THIRD = 'width:calc(100% / 3);height:calc(100% / 3)';
 const CELLS_OF_THE_3X3_GAME = `<div data-testid="tile-blank" class="sp-blank" style="${THIRD};transform:translate(100%, 100%)">
 </div>
-<button type="button" class="sp-tile" data-testid="tile-1" data-tile="1" aria-label="Tile 1" aria-disabled="true" style="${THIRD};transform:translate(200%, 0%)">
+<button type="button" class="sp-tile" data-testid="tile-1" data-tile="1" aria-label="Tile 1" aria-disabled="true" tabindex="-1" style="${THIRD};transform:translate(200%, 0%)">
 <span class="sp-face">1</span>
 </button>
-<button type="button" class="sp-tile" data-testid="tile-2" data-tile="2" aria-label="Tile 2" aria-disabled="false" style="${THIRD};transform:translate(100%, 0%)">
+<button type="button" class="sp-tile" data-testid="tile-2" data-tile="2" aria-label="Tile 2" aria-disabled="false" tabindex="0" style="${THIRD};transform:translate(100%, 0%)">
 <span class="sp-face">2</span>
 </button>
-<button type="button" class="sp-tile" data-testid="tile-3" data-tile="3" aria-label="Tile 3" aria-disabled="true" style="${THIRD};transform:translate(0%, 0%)">
+<button type="button" class="sp-tile" data-testid="tile-3" data-tile="3" aria-label="Tile 3" aria-disabled="true" tabindex="-1" style="${THIRD};transform:translate(0%, 0%)">
 <span class="sp-face">3</span>
 </button>
-<button type="button" class="sp-tile" data-testid="tile-4" data-tile="4" aria-label="Tile 4" aria-disabled="false" style="${THIRD};transform:translate(0%, 100%)">
+<button type="button" class="sp-tile" data-testid="tile-4" data-tile="4" aria-label="Tile 4" aria-disabled="false" tabindex="-1" style="${THIRD};transform:translate(0%, 100%)">
 <span class="sp-face">4</span>
 </button>
-<button type="button" class="sp-tile" data-testid="tile-5" data-tile="5" aria-label="Tile 5" aria-disabled="true" style="${THIRD};transform:translate(200%, 200%)">
+<button type="button" class="sp-tile" data-testid="tile-5" data-tile="5" aria-label="Tile 5" aria-disabled="true" tabindex="-1" style="${THIRD};transform:translate(200%, 200%)">
 <span class="sp-face">5</span>
 </button>
-<button type="button" class="sp-tile" data-testid="tile-6" data-tile="6" aria-label="Tile 6" aria-disabled="false" style="${THIRD};transform:translate(200%, 100%)">
+<button type="button" class="sp-tile" data-testid="tile-6" data-tile="6" aria-label="Tile 6" aria-disabled="false" tabindex="-1" style="${THIRD};transform:translate(200%, 100%)">
 <span class="sp-face">6</span>
 </button>
-<button type="button" class="sp-tile" data-testid="tile-7" data-tile="7" aria-label="Tile 7" aria-disabled="true" style="${THIRD};transform:translate(0%, 200%)">
+<button type="button" class="sp-tile" data-testid="tile-7" data-tile="7" aria-label="Tile 7" aria-disabled="true" tabindex="-1" style="${THIRD};transform:translate(0%, 200%)">
 <span class="sp-face">7</span>
 </button>
-<button type="button" class="sp-tile" data-testid="tile-8" data-tile="8" aria-label="Tile 8" aria-disabled="false" style="${THIRD};transform:translate(100%, 200%)">
+<button type="button" class="sp-tile" data-testid="tile-8" data-tile="8" aria-label="Tile 8" aria-disabled="false" tabindex="-1" style="${THIRD};transform:translate(100%, 200%)">
 <span class="sp-face">8</span>
 </button>
 </div>`;
@@ -94,11 +94,11 @@ describe('BoardView', () => {
     );
     assert.match(
       html,
-      /data-tile="24" aria-label="Tile 24" aria-disabled="false" style="width:calc\(100% \/ 5\);height:calc\(100% \/ 5\);transform:translate\(400%, 400%\)"/,
+      /data-tile="24" aria-label="Tile 24" aria-disabled="false" tabindex="-1" style="width:calc\(100% \/ 5\);height:calc\(100% \/ 5\);transform:translate\(400%, 400%\)"/,
     );
     assert.match(
       html,
-      /data-tile="1" aria-label="Tile 1" aria-disabled="true" style="width:calc\(100% \/ 5\);height:calc\(100% \/ 5\);transform:translate\(0%, 0%\)"/,
+      /data-tile="1" aria-label="Tile 1" aria-disabled="true" tabindex="-1" style="width:calc\(100% \/ 5\);height:calc\(100% \/ 5\);transform:translate\(0%, 0%\)"/,
     );
   });
 
@@ -109,6 +109,14 @@ describe('BoardView', () => {
       html.match(/data-tile="\d+"(?= aria-label="Tile \d+" aria-disabled="false")/g),
       ['data-tile="19"', 'data-tile="23"', 'data-tile="24"'],
     );
+  });
+
+  test('the board is one tab stop: the lowest tile that can move, the others out of the tab order', () => {
+    const html = markup(savedGame(TWENTY_FOUR_RIGHT, false));
+
+    assert.deepEqual(html.match(/data-tile="\d+"(?=[^>]* tabindex="0")/g), ['data-tile="19"']);
+    // 23 tiles out of the tab order: the markup splits into 24 pieces around them
+    assert.equal(html.split('tabindex="-1"').length, 24);
   });
 
   test('a finished game marks the board as won and no tile can move', () => {

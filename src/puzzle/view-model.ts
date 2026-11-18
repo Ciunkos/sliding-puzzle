@@ -1,5 +1,5 @@
 // Plain view logic of the puzzle screen.
-import type { SavedGame } from '../game/index.ts';
+import type { BestResult, SavedGame } from '../game/index.ts';
 import type { PuzzleState } from './definition.ts';
 import { applyMove, type Board, legalMoves, type Size, sizeOf } from './rules.ts';
 
@@ -52,6 +52,60 @@ export function sizeLabel(size: Size): string {
 
 function countMoves(moves: number): string {
   return `${String(moves)} ${moves === 1 ? 'move' : 'moves'}`;
+}
+
+function twoDigits(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+/** Play time as a clock: "0:07", "12:34", "1:02:03". Seconds are rounded down; negative is 0. */
+export function formatElapsed(ms: number): string {
+  const seconds = Math.floor(Math.max(0, ms) / 1000);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  const secondsPart = twoDigits(seconds % 60);
+  if (hours > 0) return `${String(hours)}:${twoDigits(minutes)}:${secondsPart}`;
+  return `${String(minutes)}:${secondsPart}`;
+}
+
+/** How many best results the screen lists. */
+const BEST_SHOWN = 5;
+
+/**
+ * The best results of one variant ("4x4"), best first (the engine lists each variant best first),
+ * each line once: results that read the same (moves and shown time) are one entry.
+ */
+export function bestOf(results: readonly BestResult[], variant: string): BestResult[] {
+  const seen = new Set<string>();
+  return results
+    .filter((result) => result.variant === variant)
+    .filter((result) => {
+      const line = resultLine(result);
+      if (seen.has(line)) return false;
+      seen.add(line);
+      return true;
+    })
+    .slice(0, BEST_SHOWN);
+}
+
+/** "12 moves · 0:43": the play time the browser reported, else the time the server saw. */
+export function resultLine(result: BestResult): string {
+  return `${countMoves(result.moves)} · ${formatElapsed(result.reportedMs ?? result.durationMs)}`;
+}
+
+/** How long saving must last before the screen says so: a normal move is saved sooner. */
+export const SAVING_SHOWN_AFTER_MS = 400;
+
+/** Whether to show "Saving…": saving started at `syncingSince` (undefined: not saving) and is still on at `now`. */
+export function showSaving(syncingSince: number | undefined, now: number): boolean {
+  // Not saving counts as having started infinitely far in the future.
+  return now - (syncingSince ?? Infinity) >= SAVING_SHOWN_AFTER_MS;
+}
+
+/** The line under the win banner: "Time 0:43", and "· New best!" for a personal best. */
+export function resultText(elapsedMs: number, newBest: boolean): string {
+  const time = `Time ${formatElapsed(elapsedMs)}`;
+  return newBest ? `${time} · New best!` : time;
 }
 
 export function solvedText(game: SavedGame<PuzzleState>): string {

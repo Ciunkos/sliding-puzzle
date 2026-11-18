@@ -1,6 +1,8 @@
-// The browser API client. The only stand-in is `fetch`, the outside world.
+// The browser API client. The only stand-in is `fetch`, the outside world. Each recorded request
+// says `true` after its init: it carried the abort signal of its timeout.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { neverAnswering } from '../test-support/device.ts';
 import { tallyGame } from '../test-support/tally-game.ts';
 import { createGameApi } from './api.ts';
 
@@ -27,10 +29,14 @@ function answering(reply: () => Response) {
   return createGameApi(tallyGame, '/sliding-puzzle/api', () => Promise.resolve(reply()));
 }
 
-/** An API client that pushes the url and init of every request to `sent` and answers `body`. */
+/**
+ * An API client that pushes the url and init of every request to `sent` (without the abort signal
+ * every request carries) and answers `body`.
+ */
 function recordingWith(sent: unknown[], body: unknown) {
   return createGameApi(tallyGame, '/sliding-puzzle/api', (url, init) => {
-    sent.push(url, init);
+    const { signal, ...sentInit } = { ...init };
+    sent.push(url, sentInit, signal instanceof AbortSignal);
     return Promise.resolve(Response.json(body));
   });
 }
@@ -54,42 +60,38 @@ describe('the game API client', () => {
     assert.deepEqual(sent, [
       '/sliding-puzzle/api/profiles/Ana%20Lu/games/tally',
       { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"target":5}' },
+      true,
       '/sliding-puzzle/api/profiles/Ana%20Lu/games/tally',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"target":7}' },
+      true,
     ]);
     assert.deepEqual(resumed, SAVED);
   });
 
-  test('a move and a reset send the version they were made on', async () => {
+  test('a reset sends the version it was made on', async () => {
     // Given a server that records what it was sent
     const sent: unknown[] = [];
     const api = recording(sent);
 
-    // When Ada moves from version 2, then resets from version 3
-    await api.move('Ada', { add: 2 }, 2);
+    // When Ada resets from version 3
     await api.reset('Ada', 3);
 
-    // Then each body carries its base version
+    // Then the body carries its base version
     assert.deepEqual(sent, [
-      '/sliding-puzzle/api/profiles/Ada/games/tally/move',
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{"baseVersion":2,"move":{"add":2}}',
-      },
       '/sliding-puzzle/api/profiles/Ada/games/tally/reset',
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: '{"baseVersion":3}',
       },
+      true,
     ]);
   });
 
   test('a 409 becomes a GameApiError with the status and the server message', async () => {
     const api = answering(() => Response.json({ error: 'illegal move' }, { status: 409 }));
 
-    await assert.rejects(api.move('Ada', { add: 4 }, 1), {
+    await assert.rejects(api.reset('Ada', 1), {
       name: 'GameApiError',
       status: 409,
       message: 'illegal move',
@@ -99,7 +101,7 @@ describe('the game API client', () => {
   test('a stale 409 becomes a StaleGameError that carries the current game', async () => {
     const api = answering(() => Response.json({ error: 'stale', game: SAVED }, { status: 409 }));
 
-    await assert.rejects(api.move('Ada', { add: 1 }, 1), {
+    await assert.rejects(api.reset('Ada', 1), {
       name: 'StaleGameError',
       status: 409,
       game: SAVED,
@@ -150,6 +152,7 @@ describe('the game API client', () => {
         headers: { 'content-type': 'application/json' },
         body: '{"baseVersion":2,"batchId":"batch-one","moves":[{"add":1},{"add":2}],"elapsedMs":900}',
       },
+      true,
     ]);
   });
 
@@ -174,7 +177,7 @@ describe('the game API client', () => {
 
     assert.deepEqual(
       [sent, results],
-      [['/sliding-puzzle/api/profiles/Ada/games/tally/results', {}], [RESULT]],
+      [['/sliding-puzzle/api/profiles/Ada/games/tally/results', {}, true], [RESULT]],
     );
   });
 
@@ -183,4 +186,18 @@ describe('the game API client', () => {
 
     await assert.rejects(api.results('Ada'), { message: 'Unexpected response from the server' });
   });
+
+  test(
+    'a request that is not answered in time fails as unreachable',
+    { timeout: 2000 },
+    async () => {
+      const api = createGameApi(tallyGame, '/api', neverAnswering, 5);
+
+      await assert.rejects(api.resume('Ada', { target: 5 }), {
+        name: 'GameApiError',
+        status: 0,
+        message: 'Could not reach the server',
+      });
+    },
+  );
 });

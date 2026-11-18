@@ -36,12 +36,32 @@ describe('sending a batch', () => {
     assert.deepEqual(await sendBatch(api, 'Ada', REQUEST), { type: 'rejected', game: SAVED });
   });
 
-  test('an unreachable server or an error answer without a game is a network failure', async () => {
+  test('an unreachable server or a server error is a network failure, retried later', async () => {
     const offline = answering(() => Promise.reject(new TypeError('fetch failed')));
     const broken = answering(() => Promise.resolve(new Response('oops', { status: 500 })));
 
     assert.deepEqual(await sendBatch(offline, 'Ada', REQUEST), { type: 'network-failed' });
     assert.deepEqual(await sendBatch(broken, 'Ada', REQUEST), { type: 'network-failed' });
+  });
+
+  test('a 400 or a 404 can never succeed: the batch is refused', async () => {
+    const invalid = answering(() =>
+      Promise.resolve(Response.json({ error: 'x' }, { status: 400 })),
+    );
+    const missing = answering(() =>
+      Promise.resolve(Response.json({ error: 'x' }, { status: 404 })),
+    );
+
+    assert.deepEqual(await sendBatch(invalid, 'Ada', REQUEST), { type: 'refused' });
+    assert.deepEqual(await sendBatch(missing, 'Ada', REQUEST), { type: 'refused' });
+  });
+
+  test('a request timeout and too many requests are retried later', async () => {
+    const slow = answering(() => Promise.resolve(new Response('', { status: 408 })));
+    const busy = answering(() => Promise.resolve(new Response('', { status: 429 })));
+
+    assert.deepEqual(await sendBatch(slow, 'Ada', REQUEST), { type: 'network-failed' });
+    assert.deepEqual(await sendBatch(busy, 'Ada', REQUEST), { type: 'network-failed' });
   });
 
   test('retries wait 1 s, then twice as long each time, at most 30 s', () => {

@@ -3,7 +3,18 @@ import { describe, test } from 'node:test';
 import type { SavedGame } from '../game/index.ts';
 import { grid } from '../test-support/grid.ts';
 import type { PuzzleState } from './index.ts';
-import { announcement, layout, sizeLabel, solvedText, statusText } from './view-model.ts';
+import {
+  announcement,
+  bestOf,
+  formatElapsed,
+  layout,
+  resultLine,
+  resultText,
+  showSaving,
+  sizeLabel,
+  solvedText,
+  statusText,
+} from './view-model.ts';
 
 /** One move (tile 12) away from solved: tiles 8, 11 and 12 can slide into the blank. */
 const TWELVE_DOWN = grid`
@@ -144,5 +155,113 @@ describe('announcement', () => {
     `;
 
     assert.equal(announcement(BLANK_IN_THE_MIDDLE, savedGame(twoChanges, 5, false)), '');
+  });
+});
+
+describe('formatElapsed', () => {
+  test('under an hour reads as minutes and two-digit seconds, rounded down', () => {
+    const times = [formatElapsed(0), formatElapsed(7_999), formatElapsed(754_000)];
+
+    assert.deepEqual(times, ['0:00', '0:07', '12:34']);
+  });
+
+  test('an hour or more reads as hours, minutes and seconds', () => {
+    assert.equal(formatElapsed(3_723_000), '1:02:03');
+  });
+
+  test('a negative time reads as no time at all', () => {
+    assert.equal(formatElapsed(-500), '0:00');
+  });
+});
+
+/** Best results as the engine lists them: per variant, the best first. */
+const THREE_BY_THREE = {
+  variant: '3x3',
+  moves: 20,
+  durationMs: 40_000,
+  reportedMs: 31_000,
+  finishedAt: 'a',
+};
+const ONE_MOVE = { variant: '4x4', moves: 1, durationMs: 9_000, reportedMs: 0, finishedAt: 'b' };
+const NOT_REPORTED = {
+  variant: '4x4',
+  moves: 30,
+  durationMs: 65_000,
+  reportedMs: null,
+  finishedAt: 'c',
+};
+const RESULTS = [
+  THREE_BY_THREE,
+  ONE_MOVE,
+  NOT_REPORTED,
+  { variant: '4x4', moves: 31, durationMs: 1_000, reportedMs: 1_000, finishedAt: 'd' },
+  { variant: '4x4', moves: 40, durationMs: 1_000, reportedMs: 1_000, finishedAt: 'e' },
+  { variant: '4x4', moves: 41, durationMs: 1_000, reportedMs: 1_000, finishedAt: 'f' },
+  { variant: '4x4', moves: 42, durationMs: 1_000, reportedMs: 1_000, finishedAt: 'g' },
+];
+
+describe('bestOf', () => {
+  test('the best of one variant are its first five results, in the order given', () => {
+    const best = bestOf(RESULTS, '4x4');
+
+    assert.deepEqual(best, [
+      ONE_MOVE,
+      NOT_REPORTED,
+      { variant: '4x4', moves: 31, durationMs: 1_000, reportedMs: 1_000, finishedAt: 'd' },
+      { variant: '4x4', moves: 40, durationMs: 1_000, reportedMs: 1_000, finishedAt: 'e' },
+      { variant: '4x4', moves: 41, durationMs: 1_000, reportedMs: 1_000, finishedAt: 'f' },
+    ]);
+  });
+
+  test('results that read the same (moves and shown time) are listed once', () => {
+    // Given two 1-move wins in 0 and 0.4 s, both shown as "1 move · 0:00", then a 2-move win
+    const best = bestOf(
+      [
+        ONE_MOVE,
+        { ...ONE_MOVE, reportedMs: 400, finishedAt: 'x' },
+        { ...ONE_MOVE, moves: 2, finishedAt: 'y' },
+      ],
+      '4x4',
+    );
+
+    assert.deepEqual(best, [
+      ONE_MOVE,
+      { variant: '4x4', moves: 2, durationMs: 9_000, reportedMs: 0, finishedAt: 'y' },
+    ]);
+  });
+
+  test('a variant without results has an empty list', () => {
+    assert.deepEqual(bestOf(RESULTS, '5x5'), []);
+  });
+});
+
+describe('resultLine', () => {
+  test('a result reads as its moves and the play time the browser reported', () => {
+    assert.equal(resultLine(THREE_BY_THREE), '20 moves · 0:31');
+    assert.equal(resultLine(ONE_MOVE), '1 move · 0:00');
+  });
+
+  test('without a reported time the server-side duration is shown', () => {
+    assert.equal(resultLine(NOT_REPORTED), '30 moves · 1:05');
+  });
+});
+
+describe('resultText', () => {
+  test('the result of a won game is its play time', () => {
+    assert.equal(resultText(43_500, false), 'Time 0:43');
+  });
+
+  test('a personal best says so', () => {
+    assert.equal(resultText(43_500, true), 'Time 0:43 · New best!');
+  });
+});
+
+describe('showSaving', () => {
+  test('saving is shown once it has lasted 400 ms', () => {
+    assert.deepEqual([showSaving(1_000, 1_399), showSaving(1_000, 1_400)], [false, true]);
+  });
+
+  test('nothing is shown while nothing is being saved', () => {
+    assert.equal(showSaving(undefined, 5_000), false);
   });
 });

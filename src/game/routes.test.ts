@@ -9,6 +9,8 @@ import { ALWAYS_LOW, tallyGame } from '../test-support/tally-game.ts';
 import { featureRoutes } from './server.ts';
 
 const ADA_GAME = '/api/profiles/Ada/games/tally';
+const ADD_TWO_FROM_1 = '{"baseVersion":1,"batchId":"add-two-1","moves":[{"add":2}]}';
+const ADD_TWO_FROM_2 = '{"baseVersion":2,"batchId":"add-two-2","moves":[{"add":2}]}';
 const MOVES_FROM_1 = '{"baseVersion":1,"batchId":"batch-one","moves":[{"add":1},{"add":2}]}';
 /** A new game to 5, as started by the routes. */
 const STARTED = {
@@ -93,7 +95,7 @@ describe('the game routes', () => {
 
   test('resuming an existing game is 200 with that game', async () => {
     const app = await started('');
-    await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":2}}');
+    await post(app, `${ADA_GAME}/moves`, ADD_TWO_FROM_1);
 
     const res = await put(app, ADA_GAME, '');
 
@@ -144,84 +146,39 @@ describe('the game routes', () => {
     assert.deepEqual(await res.json(), { error: 'profile not found' });
   });
 
-  test('a legal move from the current version is 200 with the moved game', async () => {
-    const app = await started('');
-
-    const res = await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":2}}');
-
-    assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), {
-      state: { count: 2, target: 5 },
-      initial: { count: 0, target: 5 },
-      moves: 1,
-      finished: false,
-      version: 2,
-      startedAt: '2026-01-01T00:00:00.000Z',
-      finishedAt: null,
-    });
-  });
-
-  test('a move body without a base version is 400', async () => {
-    const app = await started('');
-
-    const res = await post(app, `${ADA_GAME}/move`, '{"add":2}');
-
-    assert.equal(res.status, 400);
-    assert.deepEqual(await res.json(), { error: 'invalid move request' });
-  });
-
-  test('a move without a game is 404', async () => {
+  test('a batch without a game is 404', async () => {
     const app = await setup();
 
-    const res = await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":1}}');
+    const res = await post(app, `${ADA_GAME}/moves`, ADD_TWO_FROM_1);
 
     assert.equal(res.status, 404);
     assert.deepEqual(await res.json(), { error: 'no active game' });
   });
 
-  test('an illegal move is 409', async () => {
-    const app = await started('');
+  test('a batch on a finished game is 409 with the finished game', async () => {
+    const app = await started('{"target":2}');
+    await post(app, `${ADA_GAME}/moves`, ADD_TWO_FROM_1);
 
-    const res = await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":4}}');
-
-    assert.equal(res.status, 409);
-    assert.deepEqual(await res.json(), { error: 'illegal move' });
-  });
-
-  test('a move on a finished game is 409', async () => {
-    const app = await started('{"target":1}');
-    await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":1}}');
-
-    const res = await post(app, `${ADA_GAME}/move`, '{"baseVersion":2,"move":{"add":1}}');
-
-    assert.equal(res.status, 409);
-    assert.deepEqual(await res.json(), { error: 'game already finished' });
-  });
-
-  test('a move from an outdated version is 409 stale with the current game', async () => {
-    const app = await started('');
-    await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":2}}');
-
-    const res = await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":2}}');
+    const res = await post(app, `${ADA_GAME}/moves`, ADD_TWO_FROM_2);
 
     assert.equal(res.status, 409);
     assert.deepEqual(await res.json(), {
-      error: 'stale',
+      error: 'game already finished',
       game: {
-        state: { count: 2, target: 5 },
-        initial: { count: 0, target: 5 },
+        state: { count: 2, target: 2 },
+        initial: { count: 0, target: 2 },
         moves: 1,
-        finished: false,
+        finished: true,
         version: 2,
         startedAt: '2026-01-01T00:00:00.000Z',
-        finishedAt: null,
+        finishedAt: '2026-01-01T00:00:00.000Z',
       },
     });
   });
 
   test('a reset from the current version is 200 with the game back at its start', async () => {
     const app = await started('');
-    await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":2}}');
+    await post(app, `${ADA_GAME}/moves`, ADD_TWO_FROM_1);
 
     const res = await post(app, `${ADA_GAME}/reset`, '{"baseVersion":2}');
 
@@ -234,6 +191,27 @@ describe('the game routes', () => {
       version: 3,
       startedAt: '2026-01-01T00:00:00.000Z',
       finishedAt: null,
+    });
+  });
+
+  test('a reset of a finished game is 409 with the finished game', async () => {
+    const app = await started('{"target":2}');
+    await post(app, `${ADA_GAME}/moves`, ADD_TWO_FROM_1);
+
+    const res = await post(app, `${ADA_GAME}/reset`, '{"baseVersion":2}');
+
+    assert.equal(res.status, 409);
+    assert.deepEqual(await res.json(), {
+      error: 'game already finished',
+      game: {
+        state: { count: 2, target: 2 },
+        initial: { count: 0, target: 2 },
+        moves: 1,
+        finished: true,
+        version: 2,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: '2026-01-01T00:00:00.000Z',
+      },
     });
   });
 

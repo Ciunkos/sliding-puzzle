@@ -1,10 +1,11 @@
-// Over the real tally routes: a single move from version 1 tells whether a request arrived.
+// Over the real tally routes: a reset from version 1 tells whether a request arrived (it cannot be
+// replayed, so a second arrival is stale).
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { ADA_TALLY, adaDevice } from '../test-support/device.ts';
 import { flakyNetwork } from './flaky-network.ts';
 
-const MOVE = { method: 'POST', body: '{"baseVersion":1,"move":{"add":1}}' };
+const RESET = { method: 'POST', body: '{"baseVersion":1}' };
 
 async function setup() {
   const device = await adaDevice(5);
@@ -16,34 +17,34 @@ describe('the flaky network', () => {
     const { device, network } = await setup();
     network.next = 'request-lost';
 
-    await assert.rejects(network.fetch(`${ADA_TALLY}/move`, MOVE), TypeError);
+    await assert.rejects(network.fetch(`${ADA_TALLY}/reset`, RESET), TypeError);
 
-    assert.partialDeepStrictEqual(await device.stored(), { moves: 0 });
+    assert.partialDeepStrictEqual(await device.stored(), { version: 1 });
   });
 
   test('a lost answer reaches the app, but the caller only sees a failure', async () => {
     const { device, network } = await setup();
     network.next = 'answer-lost';
 
-    await assert.rejects(network.fetch(`${ADA_TALLY}/move`, MOVE), TypeError);
+    await assert.rejects(network.fetch(`${ADA_TALLY}/reset`, RESET), TypeError);
 
-    assert.partialDeepStrictEqual(await device.stored(), { moves: 1 });
+    assert.partialDeepStrictEqual(await device.stored(), { version: 2 });
   });
 
   test('a request delivered twice reaches the app twice and answers with the second', async () => {
     const { network } = await setup();
     network.next = 'delivered-twice';
 
-    const answer = await network.fetch(`${ADA_TALLY}/move`, MOVE);
+    const answer = await network.fetch(`${ADA_TALLY}/reset`, RESET);
 
-    assert.partialDeepStrictEqual(await answer.json(), { error: 'stale', game: { moves: 1 } });
+    assert.partialDeepStrictEqual(await answer.json(), { error: 'stale', game: { version: 2 } });
   });
 
   test('a delivered request is answered once', async () => {
     const { network } = await setup();
 
-    const answer = await network.fetch(`${ADA_TALLY}/move`, MOVE);
+    const answer = await network.fetch(`${ADA_TALLY}/reset`, RESET);
 
-    assert.partialDeepStrictEqual(await answer.json(), { moves: 1, version: 2 });
+    assert.partialDeepStrictEqual(await answer.json(), { version: 2 });
   });
 });

@@ -19,10 +19,10 @@ function ProfileContent(props: {
   if (state.status === 'loading') return <p>Loading profile…</p>;
   return (
     <>
-      <p role="alert" data-testid="profile-load-error" style={styles.error}>
+      <p role="alert" data-testid="profile-load-error" className={styles.error}>
         {state.message}
       </p>
-      <button type="button" style={styles.button} onClick={props.retry}>
+      <button type="button" className={styles.button} onClick={props.retry}>
         Try again
       </button>
     </>

@@ -187,27 +187,17 @@ function resultStatement(key: GameKey, swap: Swap, result: ResultRow) {
   };
 }
 
-const swapMark = z.object({ version: z.number().int(), last_batch_id: z.string().nullable() });
-
 /**
  * Compare-and-swap: writes `swap.next` only if the stored version is still `expectedVersion`.
- * A finishing write also inserts its result in the same atomic batch; a batch reports no changes,
- * so whether it won is read back from the row: the new version with this batch id.
+ * A finishing write also inserts its result, guarded by the same version, in one atomic batch;
+ * the update's own change count says whether this write won.
  */
 export async function saveIfVersion(db: Db, key: GameKey, swap: Swap): Promise<boolean> {
   const update = updateStatement(key, swap);
-  if (swap.result === undefined) {
-    const { changes } = await db.run(update.sql, update.params);
-    return changes > 0;
-  }
-  await db.batch([resultStatement(key, swap, swap.result), update]);
-  const mark = swapMark.parse(
-    await db.get('SELECT version, last_batch_id FROM games WHERE profile_id = ? AND game_id = ?', [
-      key.profileId,
-      key.gameId,
-    ]),
-  );
-  return mark.version === swap.next.version && mark.last_batch_id === swap.batchId;
+  const statements =
+    swap.result === undefined ? [update] : [resultStatement(key, swap, swap.result), update];
+  const changes = await db.batch(statements);
+  return (changes.at(-1)?.changes ?? 0) > 0;
 }
 
 const resultRows = z.array(

@@ -103,3 +103,10 @@ export async function openProfileUntilMoves(
     await expect(moves(page)).toHaveText(movesText, { timeout: 1000 });
   }).toPass();
 }
+
+/** The play time next to the move count, e.g. "0:07". */
+export const timer = (page: Page) => page.getByTestId('timer');
+/** The line under the win banner: the play time, and "New best!" for a personal best. */
+export const winResult = (page: Page) => page.getByTestId('result');
+/** The best results on the current board size. */
+export const bestList = (page: Page) => page.getByTestId('best-list');

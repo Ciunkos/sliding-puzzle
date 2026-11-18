@@ -23,13 +23,14 @@ function open(path: string): DatabaseSync {
 }
 
 /** Runs every statement in one transaction. node:sqlite is synchronous, so nothing can interleave. */
-function runBatch(sqlite: DatabaseSync, statements: readonly Statement[]): void {
+function runBatch(sqlite: DatabaseSync, statements: readonly Statement[]): { changes: number }[] {
   sqlite.exec('BEGIN');
   try {
-    for (const statement of statements) {
-      sqlite.prepare(statement.sql).run(...(statement.params ?? []));
-    }
+    const changes = statements.map((statement) => ({
+      changes: Number(sqlite.prepare(statement.sql).run(...(statement.params ?? [])).changes),
+    }));
     sqlite.exec('COMMIT');
+    return changes;
   } catch (error) {
     // SQLite may already have ended the transaction on some errors (e.g. SQLITE_FULL).
     if (sqlite.isTransaction) {
@@ -61,9 +62,7 @@ export function createNodeSqliteDb(path: string): Db {
       });
     },
     batch(statements: readonly Statement[]) {
-      return attempt(() => {
-        runBatch(sqlite, statements);
-      });
+      return attempt(() => runBatch(sqlite, statements));
     },
   };
 }

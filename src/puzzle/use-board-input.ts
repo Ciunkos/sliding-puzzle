@@ -5,20 +5,26 @@ import {
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
+  type FocusEvent,
   type RefObject,
   useRef,
+  useState,
 } from 'react';
 import {
   type Direction,
   keyDirection,
   movable,
   swipeDirection,
+  tabStopTile,
   tileForDirection,
 } from './input.ts';
 import type { Board } from './rules.ts';
 
 export interface BoardInput {
   ref: RefObject<HTMLDivElement | null>;
+  /** The tile whose button is the board's one tab stop. */
+  tabStop: number;
+  onFocus: (event: FocusEvent) => void;
   onKeyDown: (event: KeyboardEvent) => void;
   onPointerDown: (event: PointerEvent) => void;
   onPointerUp: (event: PointerEvent) => void;
@@ -64,16 +70,23 @@ function useSwipe(onSwipe: (direction: Direction) => void) {
   };
 }
 
-/** Handlers for the board element. Keys and swipes slide a tile; a tap slides the tapped tile. */
+/**
+ * Handlers for the board element. Keys and swipes slide a tile; a tap slides the tapped tile.
+ * `tabStop` is the tile with tabindex 0 (roving tabindex): the board is one tab stop, and it
+ * follows the tile that moved or got focus last.
+ */
 export function useBoardInput(
   board: Board,
   finished: boolean,
   onMove: (tile: number) => void,
 ): BoardInput {
   const ref = useRef<HTMLDivElement>(null);
+  const [preferred, setPreferred] = useState<number | undefined>(undefined);
   const slide = (tile: number | undefined): number | undefined => {
     const chosen = movable(board, finished, tile);
-    if (chosen !== undefined) onMove(chosen);
+    if (chosen === undefined) return undefined;
+    setPreferred(chosen);
+    onMove(chosen);
     return chosen;
   };
   const { takeSwipeClick, ...pointer } = useSwipe((direction) => {
@@ -81,15 +94,19 @@ export function useBoardInput(
   });
   return {
     ref,
+    tabStop: tabStopTile(board, finished, preferred),
     ...pointer,
     onKeyDown(event) {
-      const direction = keyDirection(event.key);
+      const direction = keyDirection(event);
       if (direction === undefined) return;
       event.preventDefault();
       const tile = slide(tileForDirection(board, direction));
       // Focus follows the tile that slid; its element stays the same, so it keeps focus after.
       if (tile !== undefined)
         ref.current?.querySelector<HTMLElement>(`[data-tile="${String(tile)}"]`)?.focus();
+    },
+    onFocus(event) {
+      setPreferred(tileOf(event.target));
     },
     onClick(event) {
       if (!takeSwipeClick()) slide(tileOf(event.target));

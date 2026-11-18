@@ -14,8 +14,8 @@ function Explanation({ raw }: { raw: string }): ReactElement {
   if (raw === '') return <p>The link has no profile name.</p>;
   return (
     <p>
-      The link asks for the profile <span style={styles.raw}>“{raw}”</span>, but that name cannot be
-      used.
+      The link asks for the profile <span className={styles.raw}>“{raw}”</span>, but that name
+      cannot be used.
     </p>
   );
 }
@@ -23,8 +23,10 @@ function Explanation({ raw }: { raw: string }): ReactElement {
 export function InvalidProfile(props: { raw: string; onNewRandom: () => void }): ReactElement {
   const headingId = useId();
   return (
-    <section aria-labelledby={headingId} data-testid="invalid-profile" style={styles.section}>
-      <h2 id={headingId} style={styles.heading}>
+    <section aria-labelledby={headingId} data-testid="invalid-profile" className={styles.section}>
+      {/* The profile stylesheet: this or the bar is on every profile screen. */}
+      <style>{styles.css}</style>
+      <h2 id={headingId} className={styles.heading}>
         This profile name cannot be used
       </h2>
       <Explanation raw={props.raw} />
@@ -33,7 +35,7 @@ export function InvalidProfile(props: { raw: string; onNewRandom: () => void }):
       <button
         type="button"
         data-testid="invalid-new-random"
-        style={styles.button}
+        className={styles.button}
         onClick={props.onNewRandom}
       >
         Play as a new random profile

@@ -14,8 +14,12 @@ interface BoardViewProps {
   onMove: (tile: number) => void;
 }
 
-/** A tile that cannot move is aria-disabled, not disabled: it stays focusable and keeps focus. */
-function TileButton({ tile, size }: { tile: TileView; size: Size }): ReactElement {
+/**
+ * A tile that cannot move is aria-disabled, not disabled: it stays focusable and keeps focus. Only
+ * the tab-stop tile is in the tab order (tabindex 0); the others are reached by click or focus().
+ */
+function TileButton(props: { tile: TileView; size: Size; tabStop: boolean }): ReactElement {
+  const { tile, size } = props;
   return (
     <button
       type="button"
@@ -24,6 +28,7 @@ function TileButton({ tile, size }: { tile: TileView; size: Size }): ReactElemen
       data-tile={tile.tile}
       aria-label={`Tile ${String(tile.tile)}`}
       aria-disabled={!tile.movable}
+      tabIndex={props.tabStop ? 0 : -1}
       style={place(size, tile)}
     >
       <span className="sp-face">{tile.tile}</span>
@@ -47,10 +52,16 @@ export function BoardView({ game, onMove }: BoardViewProps): ReactElement {
       onPointerUp={input.onPointerUp}
       onPointerCancel={input.onPointerCancel}
       onClick={input.onClick}
+      onFocus={input.onFocus}
     >
       <div data-testid="tile-blank" className="sp-blank" style={place(view.size, view.blank)} />
       {view.tiles.map((tile) => (
-        <TileButton key={tile.tile} tile={tile} size={view.size} />
+        <TileButton
+          key={tile.tile}
+          tile={tile}
+          size={view.size}
+          tabStop={tile.tile === input.tabStop}
+        />
       ))}
     </div>
   );

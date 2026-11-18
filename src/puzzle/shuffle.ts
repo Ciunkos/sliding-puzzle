@@ -3,15 +3,17 @@ import { applyMove, type Board, isSolved, legalMoves, type Size, solvedBoard } f
 
 /**
  * Moves per walk: more cells need a longer walk to be well mixed. Each length is a multiple of the
- * return time of an always-0.5 walk (32, 200 and 308 moves), so tests can rig a walk that ends
- * solved and reach every fallback board.
+ * number of moves after which a walk whose rng always returns 0.5 is back on the solved board
+ * (every 32 moves on 3x3, 100 on 4x4, 308 on 5x5), so tests can rig walks that end solved and
+ * reach every fallback board.
  */
 const WALK_MOVES: Record<Size, number> = { 3: 96, 4: 200, 5: 616 };
 /** Walks tried before giving up on the rng; a walk ends solved only for a rare or rigged rng. */
 const MAX_WALKS = 3;
 /**
- * Returned when every walk ended solved: from the solved board, the tile above the blank slid down,
- * then the tile above the blank again.
+ * Returned when every walk ended solved: the solved board after the tile above the blank slid down
+ * a few times in the last column (solvable, unsolved). 3x3: 6 then 3 (blank at the top). 4x4: 12
+ * then 8 (blank in the second row). 5x5: 20, 15, 10 then 5 (blank at the top).
  */
 // prettier-ignore
 const FALLBACK_BOARDS: Record<Size, Board> = {

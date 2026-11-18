@@ -25,6 +25,8 @@ const NO_STORAGE: QueueStorage = {
   getItem: () => null,
   setItem: () => undefined,
   removeItem: () => undefined,
+  key: () => null,
+  length: 0,
 };
 
 /** The browser's localStorage, or NO_STORAGE when it is absent or access itself throws. */

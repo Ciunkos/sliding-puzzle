@@ -22,6 +22,12 @@ export interface World {
   reachable: boolean;
   /** Requests to URLs ending so fail as well. */
   refused: string | undefined;
+  /** Requests to URLs ending so reach the server, but their answers are lost. */
+  losingAnswers: string | undefined;
+  /** Requests to URLs ending so never answer (until the client gives up on them). */
+  hanging: string | undefined;
+  /** Requests to URLs ending so are answered with this HTTP status by a broken server. */
+  broken: { suffix: string; status: number } | undefined;
   /** What navigator.onLine would say. */
   online: boolean;
   serverNow: Date;
@@ -30,6 +36,8 @@ export interface World {
   storage: Map<string, string>;
   /** The delays of the timers asked for, in order. */
   delays: number[];
+  /** The URL of every request the device made, in order. */
+  requests: string[];
   timers: (() => void)[];
 }
 
@@ -43,6 +51,8 @@ export interface Device {
   stored: () => Promise<unknown>;
   /** Runs every timer asked for so far, and waits until what they started has settled. */
   runTimers: () => Promise<void>;
+  /** The keys of the move queues kept in storage. */
+  queued: () => string[];
 }
 
 function environmentOf(world: World) {
@@ -51,6 +61,10 @@ function environmentOf(world: World) {
       getItem: (key: string) => world.storage.get(key) ?? null,
       setItem: (key: string, value: string) => void world.storage.set(key, value),
       removeItem: (key: string) => void world.storage.delete(key),
+      key: (index: number) => [...world.storage.keys()][index] ?? null,
+      get length() {
+        return world.storage.size;
+      },
     },
     isOnline: () => world.online,
     isVisible: () => true,
@@ -63,15 +77,58 @@ function environmentOf(world: World) {
   };
 }
 
+/** How long the device's API client waits for an answer: short, so a hanging request ends fast. */
+const API_TIMEOUT_MS = 20;
+
+const endsWith = (url: string, suffix: string | undefined) =>
+  suffix !== undefined && url.endsWith(suffix);
+
+/** A request that answers only by failing when its signal aborts. */
+function hang(signal: AbortSignal | null | undefined): Promise<Response> {
+  return new Promise((_resolve, reject) => {
+    signal?.addEventListener('abort', () => {
+      reject(new TypeError('aborted'));
+    });
+  });
+}
+
+/** A fetch that never answers: the request only ends when the client aborts it. */
+export const neverAnswering: typeof fetch = (_input, init) => hang(init?.signal);
+
+/** The answer of a broken server to `url`, if it is broken there. */
+function brokenAnswer(world: World, url: string): Response | undefined {
+  if (world.broken === undefined || !url.endsWith(world.broken.suffix)) return undefined;
+  return Response.json({ error: 'broken' }, { status: world.broken.status });
+}
+
+/** The network between the device and `app`, doing to each request what `world` says. */
+function networkOver(world: World, app: Hono): typeof fetch {
+  return async (input, init) => {
+    const url = input instanceof Request ? input.url : input.toString();
+    world.requests.push(url);
+    if (!world.reachable || endsWith(url, world.refused)) throw new TypeError('offline');
+    if (endsWith(url, world.hanging)) return hang(init?.signal);
+    const broken = brokenAnswer(world, url);
+    if (broken !== undefined) return broken;
+    const answer = await app.request(url, init);
+    if (endsWith(url, world.losingAnswers)) throw new TypeError('the answer was lost');
+    return answer;
+  };
+}
+
 function newWorld(): World {
   return {
     reachable: true,
     refused: undefined,
+    losingAnswers: undefined,
+    hanging: undefined,
+    broken: undefined,
     online: true,
     serverNow: new Date('2026-01-01T00:00:00.000Z'),
     deviceNow: 0,
     storage: new Map(),
     delays: [],
+    requests: [],
     timers: [],
   };
 }
@@ -85,13 +142,7 @@ export async function adaDevice(target: number): Promise<Device> {
   const now = () => world.serverNow;
   const context = { db, profiles, random: ALWAYS_LOW, now, enableTestRoutes: false };
   const app = featureRoutes({ definition: tallyGame }, context);
-  const api = createGameApi(tallyGame, '/api', async (url, init) => {
-    const refused =
-      world.refused !== undefined &&
-      (url instanceof Request ? url.url : url.toString()).endsWith(world.refused);
-    if (!world.reachable || refused) throw new TypeError('offline');
-    return app.request(url, init);
-  });
+  const api = createGameApi(tallyGame, '/api', networkOver(world, app), API_TIMEOUT_MS);
   await app.request(ADA_TALLY, { method: 'POST', body: JSON.stringify({ target }) });
   return {
     world,
@@ -102,10 +153,23 @@ export async function adaDevice(target: number): Promise<Device> {
       const body: unknown = await (await app.request(ADA_TALLY)).json();
       return body;
     },
+    queued: () => [...world.storage.keys()].filter((key) => key.startsWith('game-queue:')),
     runTimers: async () => {
       for (const run of world.timers.splice(0)) run();
       // The routes run on in-memory SQLite: everything they start settles before the next macrotask.
       await new Promise((resolve) => setImmediate(resolve));
     },
   };
+}
+
+/** Taps each move at its device time, in order, waiting for each tap's sending to settle. */
+export async function playAt<Move>(
+  device: Device,
+  driver: { move: (move: Move) => Promise<void> },
+  ...taps: [number, Move][]
+): Promise<void> {
+  for (const [at, move] of taps) {
+    device.world.deviceNow = at;
+    await driver.move(move);
+  }
 }

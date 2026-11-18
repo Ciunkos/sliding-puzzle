@@ -85,6 +85,22 @@ export function dbContract(name: string, open: () => Promise<Db>): void {
       ]);
     });
 
+    test('batch reports the rows each statement changed, in statement order', async () => {
+      // Given two items
+      const db = await withItems();
+      await db.run("INSERT INTO items (label, qty) VALUES ('a', 1), ('b', 2)");
+
+      // When a batch updates both, inserts one and updates none
+      const changes = await db.batch([
+        { sql: 'UPDATE items SET qty = qty + 1' },
+        { sql: INSERT_ITEM, params: ['c', 3] },
+        { sql: 'UPDATE items SET qty = 0 WHERE label = ?', params: ['none'] },
+      ]);
+
+      // Then each statement says how many rows it changed
+      assert.deepEqual(changes, [{ changes: 2 }, { changes: 1 }, { changes: 0 }]);
+    });
+
     test('an empty batch resolves and changes nothing', async () => {
       // Given one stored item
       const db = await withItems();

@@ -2,11 +2,12 @@
 // The stand-ins are the outside world only (src/test-support/device.ts): network, storage, clocks, timers.
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { adaDevice, type Device } from '../test-support/device.ts';
+import { adaDevice, type Device, playAt } from '../test-support/device.ts';
 import type { TallyState } from '../test-support/tally-game.ts';
 import { NOTICES, SessionDriver, type SessionView } from './session-driver.ts';
 
-const QUEUE_KEY = 'sliding-puzzle:queue:tally:ada';
+/** A record of a queue kept by a tab that is gone. */
+const QUEUE_KEY = 'game-queue:tally:ada:left-by-a-closed-tab';
 const ONE = { add: 1 };
 const TWO = { add: 2 };
 /** A queue kept in storage: 2 tapped on version 1 of a new game to 5, not yet sent. */
@@ -22,7 +23,8 @@ const STORED_QUEUE = JSON.stringify({
   },
   pending: [{ add: 2 }],
 });
-const MOVE_ON_V1 = '{"baseVersion":1,"move":{"add":3}}';
+/** Another device adds 3 on version 1. */
+const MOVE_ON_V1 = '{"baseVersion":1,"batchId":"other-device","moves":[{"add":3}]}';
 
 /** A driver for Ada's game on `device`; `shown()` is the last view it handed to the screen. */
 function driverOn(device: Device) {
@@ -41,11 +43,78 @@ async function loaded(target: number) {
   return { device, driver };
 }
 
+const ADA_MOVES = '/api/profiles/Ada/games/tally/moves';
+/** Another tab adds 1 on version 2. */
+const ADD_ONE_ON_V2 = '{"baseVersion":2,"batchId":"other-tab-2","moves":[{"add":1}]}';
+const COULD_NOT_SAVE = 'These moves could not be saved.';
+
+/** A device whose network is down: no answers, and the browser knows it. */
+function goOffline(device: Device): void {
+  device.world.reachable = false;
+  device.world.online = false;
+}
+
+/** The network is back, and the browser knows it. */
+function goOnline(device: Device): void {
+  device.world.reachable = true;
+  device.world.online = true;
+}
+
+/** Closes the tab of `driver` and opens the profile again in a new one on the same device. */
+async function reload(device: Device, driver: SessionDriver<TallyState, unknown, unknown>) {
+  driver.dispose();
+  const reloaded = driverOn(device);
+  await reloaded.load();
+  return reloaded;
+}
+
 /** Like `loaded`, on a device that went offline after loading. */
 async function loadedOffline(target: number) {
   const { device, driver } = await loaded(target);
   device.world.online = false;
   return { device, driver };
+}
+
+/** Another tab resets Ada's game on `version`, a second after midnight on the server. */
+async function resetElsewhere(device: Device, version: number): Promise<void> {
+  device.world.serverNow = new Date('2026-01-01T00:00:01.000Z');
+  const body = JSON.stringify({ baseVersion: version });
+  await device.app.request('/api/profiles/Ada/games/tally/reset', { method: 'POST', body });
+}
+
+function closeAll(first: { dispose: () => void }, second: { dispose: () => void }): void {
+  first.dispose();
+  second.dispose();
+}
+
+/** Ada's game to 50: offline, 1 tapped, the page reloaded (still offline), then 2 tapped. */
+async function tappedAcrossAnOfflineReload() {
+  const { device, driver } = await loaded(50);
+  goOffline(device);
+  await driver.move(ONE);
+  const reloaded = await reload(device, driver);
+  await reloaded.move(TWO);
+  return { device, reloaded };
+}
+
+/** Ada's game to 50 after two tabs, offline, tapped 3 and 1 and were closed. Still offline. */
+async function closedOfflineTabs(): Promise<Device> {
+  const { device, first, second } = await twoTabs(50);
+  goOffline(device);
+  await playAt(device, first, [1, { add: 3 }]);
+  await playAt(device, second, [2, ONE]);
+  closeAll(first, second);
+  return device;
+}
+
+/** Two tabs of Ada's profile on one device, both loaded. */
+async function twoTabs(target: number) {
+  const device = await adaDevice(target);
+  const first = driverOn(device);
+  const second = driverOn(device);
+  await first.load();
+  await second.load();
+  return { device, first, second };
 }
 
 describe('the session driver', () => {
@@ -183,12 +252,12 @@ describe('the session driver', () => {
       state: { count: 2, target: 5 },
       moves: 1,
     });
-    assert.equal(device.world.storage.has(QUEUE_KEY), false);
+    assert.deepEqual(device.queued(), []);
   });
 
   test('a stored queue made on a version the game has moved past is dropped with a notice', async () => {
     const device = await adaDevice(5);
-    await device.app.request('/api/profiles/Ada/games/tally/move', {
+    await device.app.request('/api/profiles/Ada/games/tally/moves', {
       method: 'POST',
       body: MOVE_ON_V1,
     });
@@ -206,7 +275,7 @@ describe('the session driver', () => {
   test('a tap on a game that changed elsewhere shows the server game and says so', async () => {
     // Given a loaded game, then a move from another device
     const { device, driver } = await loaded(5);
-    await device.app.request('/api/profiles/Ada/games/tally/move', {
+    await device.app.request('/api/profiles/Ada/games/tally/moves', {
       method: 'POST',
       body: MOVE_ON_V1,
     });
@@ -396,5 +465,350 @@ describe('the session driver', () => {
     await driver.load();
 
     assert.partialDeepStrictEqual(driver.shown(), { results: [], message: undefined, busy: false });
+  });
+
+  test('a reload while offline shows the stored queue and keeps playing', async () => {
+    // Given a tap made offline
+    const { device, driver } = await loaded(50);
+    goOffline(device);
+    await driver.move(ONE);
+
+    // When the page is reloaded, still offline, and another tap is made
+    const reloaded = await reload(device, driver);
+    await reloaded.move(TWO);
+
+    // Then both taps show, and the player is told they wait for the connection
+    assert.partialDeepStrictEqual(reloaded.shown(), {
+      game: { state: { count: 3, target: 50 }, moves: 2 },
+      message: NOTICES.offline,
+      busy: false,
+    });
+  });
+
+  test('after a reload while offline, every move is saved once the connection returns', async () => {
+    const { device, reloaded } = await tappedAcrossAnOfflineReload();
+
+    goOnline(device);
+    await reloaded.online();
+
+    assert.partialDeepStrictEqual(await device.stored(), {
+      state: { count: 3, target: 50 },
+      moves: 2,
+    });
+    assert.partialDeepStrictEqual(reloaded.shown(), { message: undefined, syncing: false });
+  });
+
+  test('a load that cannot reach the server is tried again until it answers', async () => {
+    // Given a device that cannot reach the server, and nothing stored
+    const device = await adaDevice(5);
+    device.world.reachable = false;
+    const driver = driverOn(device);
+    await driver.load();
+
+    // When the server is reachable again and the retry runs
+    device.world.reachable = true;
+    await device.runTimers();
+
+    // Then the game is on screen
+    assert.deepEqual(device.world.delays, [1000]);
+    assert.partialDeepStrictEqual(driver.shown(), {
+      game: { moves: 0 },
+      message: undefined,
+      busy: false,
+    });
+  });
+
+  test(
+    'a batch that never answers is given up, and a reset after it still resets',
+    { timeout: 2000 },
+    async () => {
+      const { device, driver } = await loaded(5);
+      device.world.hanging = '/moves';
+      await driver.move(TWO);
+      device.world.hanging = undefined;
+
+      await driver.reset();
+
+      assert.partialDeepStrictEqual(await device.stored(), { moves: 0 });
+      assert.partialDeepStrictEqual(driver.shown(), { game: { moves: 0 }, busy: false });
+    },
+  );
+
+  test('the play time survives a reload', async () => {
+    // Given 60 s played up to the second move, then a reload at 70 s
+    const { device, driver } = await loaded(5);
+    await playAt(device, driver, [0, ONE], [60_000, ONE]);
+    device.world.deviceNow = 70_000;
+    const reloaded = await reload(device, driver);
+
+    // When the game is finished 1 s after the reload, 10 min after it started on the server
+    device.world.serverNow = new Date('2026-01-01T00:10:00.000Z');
+    await playAt(device, reloaded, [70_500, ONE], [71_000, TWO]);
+
+    // Then 61 s of play are reported
+    assert.partialDeepStrictEqual(reloaded.shown(), {
+      results: [{ moves: 4, reportedMs: 61_000 }],
+    });
+  });
+
+  test('a finishing tap that the server rejects resumes the play time', async () => {
+    // Given a game to 3: 1 tapped at 0 s, then 1 added in another tab
+    const { device, driver } = await loaded(3);
+    await playAt(device, driver, [0, ONE]);
+    await device.app.request(ADA_MOVES, { method: 'POST', body: ADD_ONE_ON_V2 });
+
+    // When the finishing tap at 2 s is rejected, and the game is finished at 5 s (5 min on the server)
+    await playAt(device, driver, [2000, TWO]);
+    device.world.serverNow = new Date('2026-01-01T00:05:00.000Z');
+    await playAt(device, driver, [5000, ONE]);
+
+    // Then the play time counted on after the rejection: 5 s
+    assert.partialDeepStrictEqual(driver.shown(), { results: [{ moves: 3, reportedMs: 5000 }] });
+  });
+
+  test('a game reset in another tab restarts the play time', async () => {
+    // Given 1 s played on a game to 3, then a reset in another tab, then a tap at 2 s
+    const { device, driver } = await loaded(3);
+    await playAt(device, driver, [0, ONE], [1000, ONE]);
+    await resetElsewhere(device, 3);
+    await playAt(device, driver, [2000, ONE]);
+
+    // When the reset game is played from 10 s and finished at 300 s, 5 min on the server
+    device.world.serverNow = new Date('2026-01-01T00:05:01.000Z');
+    await playAt(device, driver, [10_000, ONE], [300_000, TWO]);
+
+    // Then the play time counts from the first move of the reset game: 290 s
+    assert.partialDeepStrictEqual(driver.shown(), { results: [{ reportedMs: 290_000 }] });
+  });
+
+  test('a batch the server can never accept is dropped, and the player is told', async () => {
+    const { device, driver } = await loaded(5);
+    device.world.broken = { suffix: '/moves', status: 400 };
+
+    await driver.move(TWO);
+
+    assert.partialDeepStrictEqual(driver.shown(), { game: { moves: 0 }, message: COULD_NOT_SAVE });
+    assert.deepEqual([device.queued(), device.world.delays], [[], []]);
+  });
+
+  test('moves two tabs made offline are all saved when the profile is opened again', async () => {
+    // Given two tabs, offline: 3 and 3 tapped in the first, 1 in the second, then both closed
+    const { device, first, second } = await twoTabs(50);
+    goOffline(device);
+    await playAt(device, first, [1, { add: 3 }], [2, { add: 3 }]);
+    await playAt(device, second, [3, ONE]);
+    closeAll(first, second);
+
+    // When the profile is opened again online
+    goOnline(device);
+    await driverOn(device).load();
+
+    // Then every move of both tabs is saved
+    assert.partialDeepStrictEqual(await device.stored(), {
+      state: { count: 7, target: 50 },
+      moves: 3,
+    });
+  });
+
+  test('a reset after a batch whose answer was lost resets the game', async () => {
+    const { device, driver } = await loaded(5);
+    device.world.losingAnswers = '/moves';
+    await driver.move(TWO);
+    device.world.losingAnswers = undefined;
+
+    await driver.reset();
+
+    assert.partialDeepStrictEqual(await device.stored(), { moves: 0, version: 3 });
+    assert.partialDeepStrictEqual(driver.shown(), { game: { moves: 0 }, message: undefined });
+  });
+
+  test('a reset after the game moved on elsewhere resets the newer game', async () => {
+    const { device, driver } = await loaded(5);
+    await device.app.request('/api/profiles/Ada/games/tally/moves', {
+      method: 'POST',
+      body: MOVE_ON_V1,
+    });
+
+    await driver.reset();
+
+    assert.partialDeepStrictEqual(await device.stored(), { moves: 0, version: 3 });
+    assert.partialDeepStrictEqual(driver.shown(), { game: { moves: 0 }, message: undefined });
+  });
+
+  test('a reset of a finished game sends nothing and keeps the finished game', async () => {
+    const { device, driver } = await loaded(2);
+    await driver.move(TWO);
+
+    await driver.reset();
+
+    assert.partialDeepStrictEqual(await device.stored(), { finished: true, version: 2 });
+    assert.partialDeepStrictEqual(driver.shown(), { game: { finished: true }, message: undefined });
+  });
+
+  test('a load while the browser says it is offline sends nothing and shows the stored queue', async () => {
+    // Given a tap made offline and kept in storage, and a browser that still says it is offline
+    const { device, reloaded } = await tappedAcrossAnOfflineReload();
+    device.world.requests = [];
+
+    // When the page is loaded again
+    const again = await reload(device, reloaded);
+
+    // Then the stored queue is shown, and no request was made
+    assert.partialDeepStrictEqual(again.shown(), { game: { moves: 2 }, message: NOTICES.offline });
+    assert.deepEqual(device.world.requests, []);
+  });
+
+  test('a reset that cannot reach the server says so and keeps the game', async () => {
+    const { device, driver } = await loaded(5);
+    await driver.move(TWO);
+    device.world.reachable = false;
+
+    await driver.reset();
+
+    assert.partialDeepStrictEqual(driver.shown(), {
+      game: { moves: 1 },
+      message: 'Could not reach the server',
+      busy: false,
+    });
+  });
+
+  test('a reset is busy until it is answered', async () => {
+    const { driver } = await loaded(5);
+
+    const resetting = driver.reset();
+    const during = driver.shown();
+    await resetting;
+
+    assert.partialDeepStrictEqual([during, driver.shown()], [{ busy: true }, { busy: false }]);
+  });
+
+  test('a reset of a game finished in another tab shows that finished game', async () => {
+    const { device, driver } = await loaded(3);
+    await device.app.request(ADA_MOVES, { method: 'POST', body: MOVE_ON_V1 });
+
+    await driver.reset();
+
+    assert.partialDeepStrictEqual(driver.shown(), {
+      game: { finished: true, version: 2 },
+      notice: NOTICES['server-newer'],
+    });
+  });
+
+  test('a reset after a batch that never arrived sends that batch first', async () => {
+    const { device, driver } = await loaded(5);
+    device.world.refused = '/moves';
+    await driver.move(TWO);
+    device.world.refused = undefined;
+
+    await driver.reset();
+
+    assert.partialDeepStrictEqual(await device.stored(), { moves: 0, version: 3 });
+  });
+
+  test('a tap during a reset is not sent: the reset replaces it', async () => {
+    const { device, driver } = await loaded(5);
+
+    const resetting = driver.reset();
+    await driver.move(TWO);
+    await resetting;
+
+    assert.partialDeepStrictEqual(await device.stored(), { moves: 0, version: 2 });
+  });
+
+  test('two loads at once ask the server once', async () => {
+    const device = await adaDevice(5);
+    const driver = driverOn(device);
+    device.world.requests = [];
+
+    await Promise.all([driver.load(), driver.load()]);
+
+    assert.deepEqual(device.world.requests, [
+      '/api/profiles/Ada/games/tally',
+      '/api/profiles/Ada/games/tally/results',
+    ]);
+  });
+
+  test('a load whose answer arrives after the driver was disposed shows nothing', async () => {
+    const driver = driverOn(await adaDevice(5));
+
+    const loading = driver.load();
+    driver.dispose();
+    await loading;
+
+    assert.equal(driver.views.length, 0);
+  });
+
+  test('the stored queue shown before the server answered is not sent until it is reconciled', async () => {
+    const device = await adaDevice(5);
+    device.world.storage.set(QUEUE_KEY, STORED_QUEUE);
+    device.world.reachable = false;
+    const driver = driverOn(device);
+    await driver.load();
+
+    device.world.reachable = true;
+    await driver.flush();
+
+    assert.partialDeepStrictEqual(await device.stored(), { moves: 0 });
+  });
+
+  test('the queues of two closed offline tabs, shown offline and then sent, are each sent once', async () => {
+    // Given two tabs, offline: 3 tapped in the first, 1 in the second, both closed
+    const device = await closedOfflineTabs();
+
+    // When the profile is opened offline, then the connection returns
+    const third = driverOn(device);
+    await third.load();
+    goOnline(device);
+    await third.online();
+
+    // Then both moves are saved once
+    assert.partialDeepStrictEqual(await device.stored(), {
+      state: { count: 4, target: 50 },
+      moves: 2,
+    });
+  });
+
+  test('a new game started after a load that failed is played online', async () => {
+    const device = await adaDevice(5);
+    device.world.reachable = false;
+    const driver = driverOn(device);
+    await driver.load();
+    device.world.reachable = true;
+
+    await driver.start();
+    await driver.move(TWO);
+
+    assert.partialDeepStrictEqual(await device.stored(), { moves: 1 });
+  });
+
+  test('a refused batch whose game cannot be reloaded says the moves could not be saved and retries', async () => {
+    const { device, driver } = await loaded(5);
+    device.world.broken = { suffix: '/moves', status: 400 };
+    device.world.refused = '/tally';
+
+    await driver.move(TWO);
+
+    assert.partialDeepStrictEqual(driver.shown(), { message: COULD_NOT_SAVE });
+    assert.deepEqual(device.world.delays, [1000]);
+  });
+
+  test('the play time of a tab hidden and shown again counts only while it is shown', async () => {
+    const { device, driver } = await loaded(5);
+    await playAt(device, driver, [0, ONE]);
+
+    device.world.deviceNow = 2000;
+    await driver.visibility(false);
+    device.world.deviceNow = 5000;
+    await driver.visibility(true);
+
+    assert.equal(driver.elapsedMs(6000), 3000);
+  });
+
+  test('before the first load there is no play time, and visibility changes nothing', async () => {
+    const driver = driverOn(await adaDevice(5));
+
+    await driver.visibility(false);
+
+    assert.equal(driver.elapsedMs(9000), 0);
   });
 });

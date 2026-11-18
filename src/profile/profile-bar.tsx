@@ -13,11 +13,11 @@ const COPY_MESSAGES: Record<CopyResult, string> = {
 function CopyLink({ url }: { url: string }): ReactElement {
   const [result, setResult] = useState<CopyResult | undefined>(undefined);
   return (
-    <div style={styles.row}>
+    <div className={styles.row}>
       <button
         type="button"
         data-testid="copy-link"
-        style={styles.button}
+        className={styles.button}
         onClick={() => {
           void copyText(url).then(setResult);
         }}
@@ -37,11 +37,11 @@ function SwitchForm({ form }: { form: ProfileForm }): ReactElement {
   return (
     <form onSubmit={form.submit} noValidate>
       <label htmlFor={inputId}>Play as another nickname</label>
-      <div style={styles.row}>
+      <div className={styles.row}>
         <input
           id={inputId}
           data-testid="nickname-input"
-          style={styles.input}
+          className={styles.input}
           type="text"
           autoComplete="nickname"
           autoCapitalize="none"
@@ -52,12 +52,12 @@ function SwitchForm({ form }: { form: ProfileForm }): ReactElement {
             form.setValue(event.target.value);
           }}
         />
-        <button type="submit" data-testid="profile-submit" style={styles.button}>
+        <button type="submit" data-testid="profile-submit" className={styles.button}>
           Play
         </button>
       </div>
       {form.error === undefined ? null : (
-        <p id={errorId} role="alert" data-testid="profile-error" style={styles.error}>
+        <p id={errorId} role="alert" data-testid="profile-error" className={styles.error}>
           {form.error}
         </p>
       )}
@@ -72,13 +72,13 @@ function SwitchProfile(props: {
   const form = useProfileForm(props.onOpen);
   return (
     <details data-testid="switch-profile">
-      <summary style={styles.summary}>Switch profile</summary>
+      <summary className={styles.summary}>Switch profile</summary>
       <SwitchForm form={form} />
-      <div style={styles.row}>
+      <div className={styles.row}>
         <button
           type="button"
           data-testid="new-random-profile"
-          style={styles.button}
+          className={styles.button}
           onClick={props.onRandom}
         >
           New random profile
@@ -104,11 +104,13 @@ export function ProfileBar(props: {
     // Only when the bar appears; later changes of the profile keep focus where it is.
   }, []);
   return (
-    <section aria-labelledby={headingId} style={styles.section}>
-      <h2 id={headingId} ref={heading} tabIndex={-1} style={styles.heading}>
+    <section aria-labelledby={headingId} className={styles.section}>
+      {/* The profile's stylesheet; the bar is on screen whenever the profile's error can be. */}
+      <style>{styles.css}</style>
+      <h2 id={headingId} ref={heading} tabIndex={-1} className={styles.heading}>
         Playing as <span data-testid="current-profile">{props.nickname}</span>
       </h2>
-      <p data-testid="profile-notice" style={styles.notice}>
+      <p data-testid="profile-notice" className={styles.notice}>
         There is no login. Anyone with this link can play this profile.
       </p>
       <CopyLink key={props.shareUrl} url={props.shareUrl} />

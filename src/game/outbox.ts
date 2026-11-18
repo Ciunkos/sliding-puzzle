@@ -1,17 +1,27 @@
 // Sends a batch of moves and says what its answer means for the queue (see sync.ts).
-import { type GameApi, StaleGameError } from './api.ts';
+import { type GameApi, GameApiError, StaleGameError } from './api.ts';
 import type { SavedGame } from './index.ts';
 import type { MovesRequest, SyncEvent } from './sync.ts';
 
-/** The events a send can end in. */
-export type SendOutcome<State, Move> = Extract<
-  SyncEvent<State, Move>,
-  { type: 'acknowledged' | 'rejected' | 'network-failed' }
->;
+/**
+ * The events a send can end in; `refused` is not a sync event: the server can never accept this
+ * batch (it is malformed for it, or the game or profile is gone), so the queue must be dropped.
+ */
+export type SendOutcome<State, Move> =
+  | Extract<SyncEvent<State, Move>, { type: 'acknowledged' | 'rejected' | 'network-failed' }>
+  | { type: 'refused' };
 
-/** The event for a failed send: the server's game wins, or the send is kept and retried later. */
+/** Answers that a later retry may turn into success: unreachable, timed out, busy, server errors. */
+function retriable(failure: unknown): boolean {
+  if (!(failure instanceof GameApiError)) return true;
+  const { status } = failure;
+  return status === 0 || status === 408 || status === 429 || status >= 500;
+}
+
+/** The event for a failed send: the server's game wins, a retry later, or a refusal for good. */
 function failed<State, Move>(failure: unknown): SendOutcome<State, Move> {
-  if (!(failure instanceof StaleGameError)) return { type: 'network-failed' };
+  if (retriable(failure)) return { type: 'network-failed' };
+  if (!(failure instanceof StaleGameError)) return { type: 'refused' };
   // The API client parsed this game with the same definition's state schema.
   return { type: 'rejected', game: failure.game as SavedGame<State> };
 }

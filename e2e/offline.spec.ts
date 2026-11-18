@@ -22,6 +22,15 @@ async function tapWhileOffline(page: Page, context: BrowserContext): Promise<voi
   );
 }
 
+/** Back online, the profile opens in a new tab of the same browser and shows the stored move. */
+async function reopenOnline(context: BrowserContext, nickname: string): Promise<void> {
+  await context.setOffline(false);
+  const again = await context.newPage();
+  await openProfile(again, nickname);
+  await expect(board(again)).toHaveAttribute('data-board', AFTER_TILE_11);
+  await expect(moves(again)).toHaveText('Moves: 1');
+}
+
 test('a tap while offline shows at once and is saved when the connection returns', async ({
   page,
   context,
@@ -40,6 +49,26 @@ test('a tap while offline shows at once and is saved when the connection returns
     await openProfile(otherBrowserPage, nickname);
     await expect(board(otherBrowserPage)).toHaveAttribute('data-board', AFTER_TILE_11);
     await expect(moves(otherBrowserPage)).toHaveText('Moves: 1');
+  });
+});
+
+test('a move made offline in a tab that was then closed is saved when the profile opens again', async ({
+  page,
+  context,
+  otherBrowserPage,
+  request,
+}) => {
+  const nickname = uniqueNickname();
+  await startKnownGame(page, request, nickname);
+  await test.step('offline, the tap shows at once, then the tab is closed', async () => {
+    await tapWhileOffline(page, context);
+    await page.close();
+  });
+  await test.step('back online, a new tab of the profile shows and sends the stored move', () =>
+    reopenOnline(context, nickname));
+  await test.step('another browser sees the saved move', async () => {
+    await openProfileUntilMoves(otherBrowserPage, nickname, 'Moves: 1');
+    await expect(board(otherBrowserPage)).toHaveAttribute('data-board', AFTER_TILE_11);
   });
 });
 

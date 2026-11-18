@@ -54,6 +54,8 @@ async function flush<State, Move>(
   if (round === undefined) return state;
   player.network.next = delivery;
   const event = await sendBatch(player.api, player.nickname, round.request);
+  // The real routes never refuse a batch this script sends.
+  if (event.type === 'refused') throw new Error('the batch was refused');
   return reduce(player.api.definition, round.state, event);
 }
 

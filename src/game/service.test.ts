@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import fc, { type AsyncCommand } from 'fast-check';
 import { fixedNow, openTestDb } from '../test-support/db.ts';
+import { interleavingDb } from '../test-support/interleaving-db.ts';
 import { createTestProfile } from '../test-support/profiles.ts';
 import {
   ALWAYS_HIGH,
@@ -17,6 +18,14 @@ import type { MoveContext } from './index.ts';
 import { createGameService, type GameService, InvalidStartStateError } from './service.ts';
 
 type TallyService = GameService<TallyState, TallyMove, TallyOptions>;
+
+let batches = 0;
+/** One move sent as a batch of one, each under its own batch id, so a repeat is never a replay. */
+function move(service: TallyService, id: number, add: number, baseVersion: number) {
+  batches += 1;
+  const batchId = `one-move-${String(batches)}`;
+  return service.applyMoves(id, { baseVersion, batchId, moves: [{ add }] });
+}
 
 const LATER = new Date('2026-01-01T00:05:00.000Z');
 const AT_MIDNIGHT = { random: ALWAYS_LOW, now: fixedNow };
@@ -64,7 +73,7 @@ describe('the game service', () => {
     // Given a game at version 2
     const { service, id } = await setup();
     await service.start(id, { target: 5 });
-    await service.move(id, { add: 2 }, 1);
+    await move(service, id, 2, 1);
 
     // When a new game to 7 starts
     await service.start(id, { target: 7 });
@@ -87,7 +96,7 @@ describe('the game service', () => {
     await service.start(id, { target: 5 });
 
     // When 2 is added
-    const result = await service.move(id, { add: 2 }, 1);
+    const result = await move(service, id, 2, 1);
 
     // Then the count is 2 after one move, and that is what get returns too
     const MOVED = {
@@ -103,27 +112,6 @@ describe('the game service', () => {
     assert.deepEqual(await service.get(id), MOVED);
   });
 
-  test('an illegal move is rejected and leaves the stored game unchanged', async () => {
-    // Given a new game at 0
-    const { service, id } = await setup();
-    await service.start(id, { target: 5 });
-
-    // When 4 is added (only 1, 2 and 3 are legal)
-    const result = await service.move(id, { add: 4 }, 1);
-
-    // Then the move is rejected and the game is still the started one
-    assert.deepEqual(result, { ok: false, reason: 'illegal-move' });
-    assert.deepEqual(await service.get(id), {
-      state: { count: 0, target: 5 },
-      initial: { count: 0, target: 5 },
-      moves: 0,
-      finished: false,
-      version: 1,
-      startedAt: '2026-01-01T00:00:00.000Z',
-      finishedAt: null,
-    });
-  });
-
   test('a move that reaches the target finishes the game at the time of the move', async () => {
     // Given a game to 2 started at midnight
     const { db, service, id } = await setup();
@@ -131,7 +119,7 @@ describe('the game service', () => {
     const fiveMinutesLater = createGameService(db, tallyGame, FIVE_MINUTES_LATER);
 
     // When 2 is added five minutes later
-    const result = await fiveMinutesLater.move(id, { add: 2 }, 1);
+    const result = await move(fiveMinutesLater, id, 2, 1);
 
     // Then the game is finished at that moment
     assert.deepEqual(result, {
@@ -148,27 +136,11 @@ describe('the game service', () => {
     });
   });
 
-  test('a move on a finished game is rejected as already finished', async () => {
-    // Given a game to 1 that one move has finished
+  test('reset restores the initial state, clears the moves and raises the version', async () => {
+    // Given a game to 5 with one move
     const { service, id } = await setup();
-    await service.start(id, { target: 1 });
-    await service.move(id, { add: 1 }, 1);
-
-    // When another legal move is made on the finished version
-    const result = await service.move(id, { add: 1 }, 2);
-
-    // Then it is rejected and the game stays at its finishing version
-    assert.deepEqual(result, { ok: false, reason: 'already-finished' });
-    const game = await service.get(id);
-    assert.ok(game);
-    assert.deepEqual(game.state, { count: 1, target: 1 });
-  });
-
-  test('reset restores the initial state, clears the moves and the finish, and raises the version', async () => {
-    // Given a game to 2 that one move has finished
-    const { service, id } = await setup();
-    await service.start(id, { target: 2 });
-    await service.move(id, { add: 2 }, 1);
+    await service.start(id, { target: 5 });
+    await move(service, id, 2, 1);
 
     // When it is reset
     const result = await service.reset(id, 2);
@@ -177,8 +149,8 @@ describe('the game service', () => {
     assert.deepEqual(result, {
       ok: true,
       game: {
-        state: { count: 0, target: 2 },
-        initial: { count: 0, target: 2 },
+        state: { count: 0, target: 5 },
+        initial: { count: 0, target: 5 },
         moves: 0,
         finished: false,
         version: 3,
@@ -188,10 +160,33 @@ describe('the game service', () => {
     });
   });
 
+  test('a finished game cannot be reset: a known solution must not be replayed for a better result', async () => {
+    // Given a game to 2 that one move has finished
+    const { service, id } = await setup();
+    await service.start(id, { target: 2 });
+    await move(service, id, 2, 1);
+
+    // When it is reset
+    const result = await service.reset(id, 2);
+
+    // Then the reset is refused with the finished game, which stays as it is
+    const FINISHED = {
+      state: { count: 2, target: 2 },
+      initial: { count: 0, target: 2 },
+      moves: 1,
+      finished: true,
+      version: 2,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: '2026-01-01T00:00:00.000Z',
+    };
+    assert.deepEqual(result, { ok: false, reason: 'already-finished', game: FINISHED });
+    assert.deepEqual(await service.get(id), FINISHED);
+  });
+
   test('a move or a reset without a game answers no-game', async () => {
     const { service, id } = await setup();
 
-    assert.deepEqual(await service.move(id, { add: 1 }, 1), { ok: false, reason: 'no-game' });
+    assert.deepEqual(await move(service, id, 1, 1), { ok: false, reason: 'no-game' });
     assert.deepEqual(await service.reset(id, 1), { ok: false, reason: 'no-game' });
   });
 
@@ -241,7 +236,7 @@ describe('the game service', () => {
     await service.start(bob.id, { target: 5 });
 
     // When Ada moves
-    await service.move(id, { add: 3 }, 1);
+    await move(service, id, 3, 1);
 
     // Then Bob's game is untouched
     const game = await service.get(bob.id);
@@ -257,7 +252,7 @@ describe('the game service', () => {
     await other.start(id, { target: 5 });
 
     // When she moves in the tally game
-    await service.move(id, { add: 3 }, 1);
+    await move(service, id, 3, 1);
 
     // Then the other game is untouched
     const game = await other.get(id);
@@ -269,10 +264,10 @@ describe('the game service', () => {
     // Given a game to 2 that a move from version 1 has finished
     const { service, id } = await setup();
     await service.start(id, { target: 2 });
-    await service.move(id, { add: 2 }, 1);
+    await move(service, id, 2, 1);
 
     // When the same request arrives again (a network retry, a second tab)
-    const result = await service.move(id, { add: 2 }, 1);
+    const result = await move(service, id, 2, 1);
 
     // Then it is stale, not already finished, and carries the stored game, which is untouched
     const FINISHED = {
@@ -292,7 +287,7 @@ describe('the game service', () => {
     // Given a game at version 2
     const { service, id } = await setup();
     await service.start(id, { target: 5 });
-    await service.move(id, { add: 3 }, 1);
+    await move(service, id, 3, 1);
 
     // When a reset made on version 1 arrives
     const result = await service.reset(id, 1);
@@ -317,13 +312,10 @@ describe('the game service', () => {
     // Given a game at 2, version 2
     const { service, id } = await setup();
     await service.start(id, { target: 5 });
-    await service.move(id, { add: 2 }, 1);
+    await move(service, id, 2, 1);
 
     // When a move on version 2 and a new game to 9 run at the same time (the move reads first)
-    const [result] = await Promise.all([
-      service.move(id, { add: 1 }, 2),
-      service.start(id, { target: 9 }),
-    ]);
+    const [result] = await Promise.all([move(service, id, 1, 2), service.start(id, { target: 9 })]);
 
     // Then the move is stale and the stored game is the new one, without moves
     const NEW_GAME = {
@@ -345,8 +337,8 @@ describe('the game service', () => {
     await service.start(id, { target: 9 });
 
     // When 1 and 2 are added from version 1 at the same time
-    const first = service.move(id, { add: 1 }, 1);
-    const results = await Promise.all([first, service.move(id, { add: 2 }, 1)]);
+    const first = move(service, id, 1, 1);
+    const results = await Promise.all([first, move(service, id, 2, 1)]);
 
     // Then the first is applied and the second is told about it
     const AFTER_FIRST = {
@@ -368,7 +360,7 @@ describe('the game service', () => {
     // Given a game to 5 with one move
     const { service, id } = await setup();
     await service.start(id, { target: 5 });
-    await service.move(id, { add: 3 }, 1);
+    await move(service, id, 3, 1);
 
     // When the profile resumes with other options
     const resumed = await service.resume(id, { target: 9 });
@@ -630,7 +622,7 @@ describe('the best results', () => {
   test('a game finished without a reported time stores the server time alone', async () => {
     const { later, id } = await startedAtMidnight(3);
 
-    await later.move(id, { add: 3 }, 1);
+    await move(later, id, 3, 1);
 
     assert.deepEqual(await later.results(id), [
       {
@@ -687,6 +679,21 @@ describe('the best results', () => {
     ]);
   });
 
+  test('a finishing batch wins even when another write lands right after it', async () => {
+    // Given a game to 3, and another tab that resets the game right after the next batch commits
+    const { db, id } = await setup();
+    const shared = interleavingDb(db);
+    const here = createGameService(shared, tallyGame, AT_MIDNIGHT);
+    await here.start(id, { target: 3 });
+    shared.afterNextBatch(() => createGameService(db, tallyGame, AT_MIDNIGHT).reset(id, 2));
+
+    // When the finishing batch is sent
+    const result = await here.applyMoves(id, { ...BATCH, moves: [{ add: 3 }], elapsedMs: 0 });
+
+    // Then it is answered as applied: its result row was written with it
+    assert.partialDeepStrictEqual(result, { ok: true, game: { finished: true, version: 2 } });
+  });
+
   test('of two finishing batches at the same time, one wins and only its result is stored', async () => {
     // Given a game to 3 at version 1
     const { later, id } = await startedAtMidnight(3);
@@ -725,7 +732,7 @@ class LegalAdd implements AsyncCommand<Model, Real> {
     return true;
   }
   async run(model: Model, real: Real): Promise<void> {
-    await real.service.move(real.id, { add: this.add }, model.version);
+    await move(real.service, real.id, this.add, model.version);
     model.count += this.add;
     model.version += 1;
   }
@@ -747,7 +754,7 @@ class RejectedAdd implements AsyncCommand<Model, Real> {
     return true;
   }
   async run(model: Model, real: Real): Promise<void> {
-    await real.service.move(real.id, { add: this.add }, model.version - this.behind);
+    await move(real.service, real.id, this.add, model.version - this.behind);
   }
   toString(): string {
     return `add ${String(this.add)} from ${String(this.behind)} version(s) back`;

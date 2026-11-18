@@ -1,7 +1,8 @@
 // Styles of the puzzle screen. A stylesheet string, rendered once by the screen in a <style>
 // element: media queries (dark mode, reduced motion), :focus-visible and keyframes need real CSS,
 // and a `.css` import would break the unit tests (scripts/tsx-hooks.js loads only .ts and .tsx).
-// Every class starts with `sp-`, so nothing here touches the rest of the page.
+// Every class starts with `sp-`, so nothing here touches the rest of the page. The card colours
+// match src/profile/styles.ts and the page colours in src/web/app.tsx (duplicated on purpose).
 // Contrast (WCAG AA): white on tile #1f4fb8 is 7.3:1, on dark tile #3566d6 5.2:1, on won #13703a 6.2:1.
 import type { CSSProperties } from 'react';
 import type { Size } from './rules.ts';
@@ -32,6 +33,7 @@ export const css = `
   --sp-tile: #1f4fb8;
   --sp-tile-text: #fff;
   --sp-won: #13703a;
+  --sp-won-text: #13703a;
   --sp-ring-inner: #fff;
   --sp-ring-outer: #111;
   --sp-button: #fff;
@@ -51,7 +53,7 @@ export const css = `
     --sp-text: #e8ecf3;
     --sp-muted: #aab3c2;
     --sp-surface: #10151f;
-    --sp-line: #5b6577;
+    --sp-line: #6b7689;
     --sp-well: #232b3a;
     --sp-tile: #3566d6;
     --sp-ring-inner: #10151f;
@@ -61,6 +63,7 @@ export const css = `
     --sp-pressed: #e8ecf3;
     --sp-pressed-text: #10151f;
     --sp-error: #ff8a9a;
+    --sp-won-text: #6fdc98;
   }
 }
 .sp-visually-hidden {
@@ -152,27 +155,45 @@ export const css = `
   40% { transform: scale(1.04); }
   100% { transform: scale(1); }
 }
-.sp-banner {
-  margin: 12px 0 0;
-  padding: 10px 12px;
-  border-radius: 6px;
-  background: var(--sp-won);
-  color: #fff;
-  font-weight: 600;
-  text-align: center;
-  animation: sp-rise 320ms ease-out;
-}
+.sp-stage { position: relative; max-width: 28rem; margin: 0 auto; }
+.sp-win { animation: sp-rise 320ms ease-out; }
+.sp-banner { margin: 0; color: var(--sp-won-text); font-size: 17px; font-weight: 700; }
+.sp-result { margin: 0; font-variant-numeric: tabular-nums; }
 /* Transform only: fading the opacity would fail contrast checks while it runs. */
 @keyframes sp-rise {
   from { transform: translateY(8px) scale(0.96); }
   to { transform: none; }
 }
-.sp-error { margin: 12px 0 0; color: var(--sp-error); font-weight: 600; }
+/* The line under the board: two lines are always reserved (how to play, a notice, or the win),
+   so none of them appearing or going pushes the controls. */
+.sp-below {
+  box-sizing: border-box;
+  min-height: 52px;
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 6px 2px;
+  font-size: 15px;
+}
+/* A fixed line height, so the bolder win lines take exactly the reserved two lines. */
+.sp-below p { margin: 0; line-height: 20px; }
+.sp-howto { color: var(--sp-muted); }
+.sp-notice { color: var(--sp-muted); }
+.sp-error { color: var(--sp-error); font-weight: 600; }
+.sp-counts { display: flex; gap: 14px; margin: 0; }
+.sp-timer { color: var(--sp-muted); }
+.sp-saving { color: var(--sp-muted); font-size: 14px; font-weight: 400; }
+.sp-best { margin: 16px 0 0; }
+.sp-best ol {
+  margin: 6px 0 0;
+  padding-left: 1.6em;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
 .sp-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 12px 0 0;
+  margin: 8px 0 0;
 }
 .sp-button {
   flex: 1 1 0;
@@ -193,6 +214,8 @@ export const css = `
   font-weight: 700;
 }
 .sp-button[aria-disabled='true'] { cursor: progress; }
+/* Unavailable, not just busy: muted and dashed (its description says why). */
+.sp-unavailable[aria-disabled='true'] { border-style: dashed; color: var(--sp-muted); cursor: not-allowed; }
 .sp-button:focus-visible,
 .sp-tile:focus-visible { outline: none; }
 .sp-button:focus-visible {
@@ -204,6 +227,6 @@ export const css = `
 .sp-hint { margin: 6px 0 0; color: var(--sp-muted); font-size: 14px; }
 @media (prefers-reduced-motion: reduce) {
   .sp-tile { transition: none; }
-  .sp-won, .sp-banner { animation: none; }
+  .sp-won, .sp-win { animation: none; }
 }
 `;

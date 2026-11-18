@@ -1,31 +1,29 @@
 // Hono routes of one game: /api/profiles/:nickname/games/:gameId (GET, PUT, POST), .../moves,
-// .../move, .../reset, .../results.
+// .../reset, .../results.
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
 import { batchIdSchema, type GameDefinition, MAX_BATCH } from './index.ts';
-import type { BatchResult, GameFailure, GameResult, GameService } from './service.ts';
+import type { GameFailure, GameResult, GameService } from './service.ts';
 
 /** What the engine needs from the profile module: resolve a nickname to an id. */
 export interface ProfileLookup {
   find(nickname: string): Promise<{ id: number } | undefined>;
 }
 
-const FAILURES: Record<GameFailure, { status: 404 | 409; error: string }> = {
-  'no-game': { status: 404, error: 'no active game' },
-  'illegal-move': { status: 409, error: 'illegal move' },
-  'already-finished': { status: 409, error: 'game already finished' },
+/** Every refusal is 409 with the stored game, so the browser can adopt it. */
+const REFUSALS: Record<GameFailure, string> = {
+  stale: 'stale',
+  'illegal-move': 'illegal move',
+  'already-finished': 'game already finished',
 };
 
 const baseVersion = z.number().int().min(1);
 const resetBody = z.object({ baseVersion });
 
-function respond<State>(c: Context, result: GameResult<State> | BatchResult<State>): Response {
+function respond<State>(c: Context, result: GameResult<State>): Response {
   if (result.ok) return c.json(result.game, 200);
-  if (result.reason === 'stale') return c.json({ error: 'stale', game: result.game }, 409);
-  const failure = FAILURES[result.reason];
-  // A rejected batch carries the stored game, so the browser can adopt it.
-  if ('game' in result) return c.json({ error: failure.error, game: result.game }, failure.status);
-  return c.json({ error: failure.error }, failure.status);
+  if (result.reason === 'no-game') return c.json({ error: 'no active game' }, 404);
+  return c.json({ error: REFUSALS[result.reason], game: result.game }, 409);
 }
 
 /** The JSON body; an empty body counts as `{}`; undefined when the body is not JSON. */
@@ -52,12 +50,11 @@ function profileGuard(profiles: ProfileLookup) {
 
 const invalid = (c: Context, error: string) => c.json({ error }, 400);
 
-/** The handlers of a batch of moves and of a single move. */
+/** The handler of a batch of moves. */
 function moveHandlers<State, Move>(
   definition: GameDefinition<State, Move, unknown>,
   service: GameService<State, Move, unknown>,
 ) {
-  const moveBody = z.object({ baseVersion, move: definition.moveSchema });
   const movesBody = z.object({
     baseVersion,
     batchId: batchIdSchema,
@@ -69,11 +66,6 @@ function moveHandlers<State, Move>(
       const body = movesBody.safeParse(await readBody(c));
       if (!body.success) return invalid(c, 'invalid moves request');
       return respond(c, await service.applyMoves(profileId, body.data));
-    },
-    move: async (c, profileId) => {
-      const body = moveBody.safeParse(await readBody(c));
-      if (!body.success) return invalid(c, 'invalid move request');
-      return respond(c, await service.move(profileId, body.data.move, body.data.baseVersion));
     },
   } satisfies Record<string, ProfileHandler>;
 }
@@ -129,7 +121,6 @@ export function gameRoutes<State, Move, Options>(
   app.put(base, withProfile(handle.resume));
   app.post(base, withProfile(handle.start));
   app.post(`${base}/moves`, withProfile(handle.moves));
-  app.post(`${base}/move`, withProfile(handle.move));
   app.get(`${base}/results`, withProfile(handle.results));
   app.post(`${base}/reset`, withProfile(handle.reset));
   return app;

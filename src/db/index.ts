@@ -15,8 +15,8 @@ export interface Db {
   run(sql: string, params?: readonly SqlParam[]): Promise<{ changes: number }>;
   all(sql: string, params?: readonly SqlParam[]): Promise<Row[]>;
   get(sql: string, params?: readonly SqlParam[]): Promise<Row | undefined>;
-  /** Atomic: every statement commits, or none does. */
-  batch(statements: readonly Statement[]): Promise<void>;
+  /** Atomic: every statement commits, or none does. Returns the rows each statement changed, in order. */
+  batch(statements: readonly Statement[]): Promise<{ changes: number }[]>;
 }
 
 // Minimal structural types for the D1 binding. Defined here so @cloudflare/workers-types is not needed.
@@ -30,7 +30,7 @@ export interface D1PreparedLike {
 
 export interface D1Like {
   prepare(sql: string): D1PreparedLike;
-  batch(stmts: D1PreparedLike[]): Promise<unknown[]>;
+  batch(stmts: D1PreparedLike[]): Promise<{ meta: { changes: number } }[]>;
 }
 
 function toRow(value: unknown): Row {
@@ -61,9 +61,10 @@ export function createD1Db(binding: D1Like): Db {
     },
     async batch(statements) {
       // D1 rejects an empty batch ("No SQL statements detected"); the port treats it as a no-op.
-      if (statements.length === 0) return;
+      if (statements.length === 0) return [];
       // D1 batch() runs its statements in one transaction and rolls back on any failure.
-      await binding.batch(statements.map((s) => prepare(s.sql, s.params)));
+      const results = await binding.batch(statements.map((s) => prepare(s.sql, s.params)));
+      return results.map((result) => ({ changes: result.meta.changes }));
     },
   };
 }

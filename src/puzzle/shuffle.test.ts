@@ -91,7 +91,7 @@ describe('shuffle', () => {
 
     const board = shuffle(3, rng);
 
-    // Then it is 6 slid down, then 3 slid down (2 inversions, even)
+    // Then it is 6 slid down, then 3 slid down (4 inversions: 4, 5 > 3 and 7, 8 > 6; even)
     assert.deepEqual(
       board,
       grid`
@@ -107,7 +107,8 @@ describe('shuffle', () => {
 
     const board = shuffle(5, rng);
 
-    // Then it is 20 slid down, then 15 slid down (2 * 3 inversions, even)
+    // Then it is 20, 15, 10 and 5 slid down in turn (16 inversions: four larger tiles before each
+    // of 5, 10, 15 and 20; even)
     assert.deepEqual(
       board,
       grid`
