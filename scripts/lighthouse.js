@@ -61,6 +61,10 @@ async function waitForHealth(origin) {
   throw new Error(`the server at ${origin} did not answer its health check`);
 }
 
+// CI runners (Ubuntu on GitHub) do not let Chrome create its sandbox, so Chrome never starts
+// there without --no-sandbox. Locally the sandbox stays on.
+const CHROME_FLAGS = process.env.CI ? '--headless=new --no-sandbox' : '--headless=new';
+
 /** One Lighthouse run; returns the scores (0-100), CLS and TBT. */
 function measure(url, dir, run) {
   const output = join(dir, `run-${String(run)}.json`);
@@ -73,7 +77,7 @@ function measure(url, dir, run) {
       '--output=json',
       `--output-path=${output}`,
       `--only-categories=${CATEGORIES.join(',')}`,
-      '--chrome-flags=--headless=new',
+      `--chrome-flags=${CHROME_FLAGS}`,
       '--quiet',
     ],
     { stdio: 'inherit', env: { ...process.env, CHROME_PATH: chromium.executablePath() } },
