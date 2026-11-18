@@ -113,3 +113,7 @@ In the repository settings, under Branches, add a rule for `main`:
 - do not allow bypassing the rule, and block force pushes and deletions.
 
 Deploy only from `main` after its CI is green.
+
+> The first deploy showed that the zone route takes a few seconds to answer after `wrangler deploy`
+> returns: the smoke script ran at once and saw a 404. `npm run deploy` now waits 15 seconds before
+> the smoke script. If it still fails on its first check, wait a moment and run `sh tests/prod.sh` again.

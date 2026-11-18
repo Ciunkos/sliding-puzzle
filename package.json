@@ -28,7 +28,7 @@
     "lighthouse": "node scripts/lighthouse.js",
     "verify": "node scripts/verify.js",
     "predeploy": "npm run check && npm run test:e2e && npm run worker:check && wrangler d1 migrations apply sliding-puzzle --remote",
-    "deploy": "wrangler deploy && sh tests/prod.sh"
+    "deploy": "wrangler deploy && sleep 15 && sh tests/prod.sh"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.9",
