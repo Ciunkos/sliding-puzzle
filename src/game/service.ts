@@ -2,21 +2,38 @@
 import type { z } from 'zod';
 import type { Db } from '../db/index.ts';
 import { type GameDefinition, type SavedGame, savedGameSchema } from './index.ts';
-import { type GameKey, readGame, saveIfVersion, upsertGame } from './store.ts';
+import { type GameKey, insertIfAbsent, readGame, saveIfVersion, upsertGame } from './store.ts';
 
 export type GameFailure = 'no-game' | 'illegal-move' | 'already-finished';
 
+/**
+ * `stale`: the request was made on another version than the stored one (a duplicate request, a
+ * second tab, a game replaced meanwhile). Nothing changed; `game` is the stored game to adopt.
+ */
 export type GameResult<State> =
-  { ok: true; game: SavedGame<State> } | { ok: false; reason: GameFailure };
+  | { ok: true; game: SavedGame<State> }
+  | { ok: false; reason: GameFailure }
+  | { ok: false; reason: 'stale'; game: SavedGame<State> };
+
+export interface Resumed<State> {
+  game: SavedGame<State>;
+  /** True when this call created the game, false when the profile already had one. */
+  created: boolean;
+}
 
 export interface GameService<State, Move, Options> {
   get(profileId: number): Promise<SavedGame<State> | undefined>;
+  /** The profile's game; atomically starts one from `options` if there is none. */
+  resume(profileId: number, options: Options): Promise<Resumed<State>>;
   /** Starts a new game, replacing any existing one. */
   start(profileId: number, options: Options): Promise<SavedGame<State>>;
-  /** Like start, but from a chosen state. Throws InvalidStartStateError unless the definition accepts it. */
+  /** Like start, but from a chosen state. Throws InvalidStartStateError unless the state matches
+   * the state schema and the definition accepts it as a start. */
   startWith(profileId: number, state: State): Promise<SavedGame<State>>;
-  move(profileId: number, move: Move): Promise<GameResult<State>>;
-  reset(profileId: number): Promise<GameResult<State>>;
+  /** Applies `move` to the game at `baseVersion`, the version the caller made it on. */
+  move(profileId: number, move: Move, baseVersion: number): Promise<GameResult<State>>;
+  /** Resets the game at `baseVersion` back to its initial state. */
+  reset(profileId: number, baseVersion: number): Promise<GameResult<State>>;
 }
 
 export interface GameServiceOptions {
@@ -30,8 +47,6 @@ export class InvalidStartStateError extends Error {
     this.name = 'InvalidStartStateError';
   }
 }
-
-const MAX_ATTEMPTS = 3;
 
 type Step<State> = (current: SavedGame<State>, now: string) => GameResult<State>;
 
@@ -83,24 +98,53 @@ function keyOf(engine: Engine<unknown, unknown, unknown>, profileId: number): Ga
   return { profileId, gameId: engine.definition.id };
 }
 
-/** Read, compute, compare-and-swap; re-read and retry if another writer got in first. */
+/** The stored game as a stale result, for a request made on another version. */
+async function stale<State>(
+  engine: Engine<State, unknown, unknown>,
+  key: GameKey,
+): Promise<GameResult<State>> {
+  const game = await readGame(engine.db, key, engine.schema);
+  return game === undefined
+    ? { ok: false, reason: 'no-game' }
+    : { ok: false, reason: 'stale', game };
+}
+
+/**
+ * Read, check the caller's version, compute, compare-and-swap. No retry: a request made on another
+ * version is stale, and the caller decides what to do with the current game.
+ */
 async function mutate<State>(
   engine: Engine<State, unknown, unknown>,
   profileId: number,
+  baseVersion: number,
   step: Step<State>,
 ): Promise<GameResult<State>> {
   const key = keyOf(engine, profileId);
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    const current = await readGame(engine.db, key, engine.schema);
-    if (current === undefined) return { ok: false, reason: 'no-game' };
-    const now = engine.now().toISOString();
-    const result = step(current, now);
-    if (!result.ok) return result;
-    if (await saveIfVersion(engine.db, key, current.version, result.game, now)) return result;
-  }
-  throw new Error(
-    `game "${key.gameId}" of profile ${String(profileId)} kept changing; gave up after ${String(MAX_ATTEMPTS)} attempts`,
-  );
+  const current = await readGame(engine.db, key, engine.schema);
+  if (current === undefined) return { ok: false, reason: 'no-game' };
+  if (current.version !== baseVersion) return { ok: false, reason: 'stale', game: current };
+  const now = engine.now().toISOString();
+  const result = step(current, now);
+  if (!result.ok) return result;
+  if (await saveIfVersion(engine.db, key, baseVersion, result.game, now)) return result;
+  return stale(engine, key);
+}
+
+/** A game that starts at `state` now: no moves, finished only if `state` already is. */
+function freshGame<State>(
+  engine: Engine<State, unknown, unknown>,
+  state: State,
+): Omit<SavedGame<State>, 'version'> {
+  const now = engine.now().toISOString();
+  const finished = engine.definition.isFinished(state);
+  return {
+    state,
+    initial: state,
+    moves: 0,
+    finished,
+    startedAt: now,
+    finishedAt: finished ? now : null,
+  };
 }
 
 /** Starts (or replaces) the profile's game with `state` as its initial state. */
@@ -109,18 +153,33 @@ async function startFrom<State>(
   profileId: number,
   state: State,
 ): Promise<SavedGame<State>> {
-  const now = engine.now().toISOString();
-  const finished = engine.definition.isFinished(state);
-  const fresh = {
-    state,
-    initial: state,
-    moves: 0,
-    finished,
-    startedAt: now,
-    finishedAt: finished ? now : null,
-  };
+  const fresh = freshGame(engine, state);
   const version = await upsertGame(engine.db, keyOf(engine, profileId), fresh);
   return { ...fresh, version };
+}
+
+/** The profile's game, inserted from `state` in the same statement if it had none. */
+async function resumeFrom<State>(
+  engine: Engine<State, unknown, unknown>,
+  profileId: number,
+  state: State,
+): Promise<Resumed<State>> {
+  const key = keyOf(engine, profileId);
+  const created = await insertIfAbsent(engine.db, key, freshGame(engine, state));
+  const game = await readGame(engine.db, key, engine.schema);
+  if (game === undefined) {
+    throw new Error(`game "${key.gameId}" of profile ${String(profileId)} is missing after insert`);
+  }
+  return { game, created };
+}
+
+/** Whether `state` is a valid state of the game and an acceptable start (see startWith). */
+function isAcceptableStart<State>(
+  definition: GameDefinition<State, unknown, unknown>,
+  state: State,
+) {
+  if (!definition.stateSchema.safeParse(state).success) return false;
+  return definition.isValidStart?.(state) ?? !definition.isFinished(state);
 }
 
 export function createGameService<State, Move, Options>(
@@ -133,14 +192,17 @@ export function createGameService<State, Move, Options>(
 
   return {
     get: (profileId) => readGame(db, keyOf(engine, profileId), schema),
+    resume: (profileId, startOptions) =>
+      resumeFrom(engine, profileId, definition.start(startOptions, options.random)),
     start: (profileId, startOptions) =>
       startFrom(engine, profileId, definition.start(startOptions, options.random)),
     async startWith(profileId, state) {
-      const valid = definition.isValidStart?.(state) ?? !definition.isFinished(state);
-      if (!valid) throw new InvalidStartStateError(definition.id);
+      if (!isAcceptableStart(definition, state)) throw new InvalidStartStateError(definition.id);
       return startFrom(engine, profileId, state);
     },
-    move: (profileId, move) => mutate(engine, profileId, moveStep(definition, move)),
-    reset: (profileId) => mutate(engine, profileId, resetStep(definition)),
+    move: (profileId, move, baseVersion) =>
+      mutate(engine, profileId, baseVersion, moveStep(definition, move)),
+    reset: (profileId, baseVersion) =>
+      mutate(engine, profileId, baseVersion, resetStep(definition)),
   };
 }

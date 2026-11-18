@@ -12,18 +12,37 @@ export class GameApiError extends Error {
   }
 }
 
+/** The request was made on an outdated version; `game` is the server's current game. */
+export class StaleGameError<State> extends GameApiError {
+  readonly game: SavedGame<State>;
+
+  constructor(game: SavedGame<State>) {
+    super('stale', 409);
+    this.name = 'StaleGameError';
+    this.game = game;
+  }
+}
+
 export interface GameApi<State, Move, Options> {
-  /** The saved game, or undefined when the profile has none. */
-  load(nickname: string): Promise<SavedGame<State> | undefined>;
+  /** The saved game, or a new one from `options` when the profile has none. */
+  resume(nickname: string, options: Options): Promise<SavedGame<State>>;
+  /** A new game, replacing any existing one. */
   start(nickname: string, options: Options): Promise<SavedGame<State>>;
-  move(nickname: string, move: Move): Promise<SavedGame<State>>;
-  reset(nickname: string): Promise<SavedGame<State>>;
+  /** Rejects with StaleGameError when the game is no longer at `baseVersion`. */
+  move(nickname: string, move: Move, baseVersion: number): Promise<SavedGame<State>>;
+  reset(nickname: string, baseVersion: number): Promise<SavedGame<State>>;
 }
 
 const errorBody = z.object({ error: z.string() });
 
-async function failure(res: Response): Promise<GameApiError> {
-  const body: unknown = await res.json().catch(() => undefined);
+/** The error a failed response stands for: stale (with the current game), or a plain message. */
+function failure<State>(
+  res: Response,
+  body: unknown,
+  schema: z.ZodType<SavedGame<State>>,
+): GameApiError {
+  const stale = z.object({ error: z.literal('stale'), game: schema }).safeParse(body);
+  if (res.status === 409 && stale.success) return new StaleGameError(stale.data.game);
   const parsed = errorBody.safeParse(body);
   const message = parsed.success
     ? parsed.data.error
@@ -31,9 +50,9 @@ async function failure(res: Response): Promise<GameApiError> {
   return new GameApiError(message, res.status);
 }
 
-function postJson(body: unknown): RequestInit {
+function sendJson(method: 'PUT' | 'POST', body: unknown): RequestInit {
   return {
-    method: 'POST',
+    method,
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   };
@@ -47,30 +66,26 @@ export function createGameApi<State, Move, Options>(
   const base = (nickname: string) =>
     `/api/profiles/${encodeURIComponent(nickname)}/games/${encodeURIComponent(definition.id)}`;
 
-  async function send(url: string, init?: RequestInit): Promise<Response> {
+  async function send(url: string, init: RequestInit): Promise<SavedGame<State>> {
+    let res: Response;
     try {
-      return await fetchImpl(url, init);
+      res = await fetchImpl(url, init);
     } catch {
       throw new GameApiError('Could not reach the server', 0);
     }
-  }
-
-  async function expectGame(res: Response): Promise<SavedGame<State>> {
-    if (!res.ok) throw await failure(res);
-    const parsed = schema.safeParse(await res.json().catch(() => undefined));
+    const body: unknown = await res.json().catch(() => undefined);
+    if (!res.ok) throw failure(res, body, schema);
+    const parsed = schema.safeParse(body);
     if (!parsed.success) throw new GameApiError('Unexpected response from the server', res.status);
     return parsed.data;
   }
 
   return {
-    async load(nickname) {
-      const res = await send(base(nickname));
-      return res.status === 404 ? undefined : expectGame(res);
-    },
-    start: async (nickname, options) => expectGame(await send(base(nickname), postJson(options))),
-    move: async (nickname, move) =>
-      expectGame(await send(`${base(nickname)}/move`, postJson(move))),
-    reset: async (nickname) =>
-      expectGame(await send(`${base(nickname)}/reset`, { method: 'POST' })),
+    resume: (nickname, options) => send(base(nickname), sendJson('PUT', options)),
+    start: (nickname, options) => send(base(nickname), sendJson('POST', options)),
+    move: (nickname, move, baseVersion) =>
+      send(`${base(nickname)}/move`, sendJson('POST', { baseVersion, move })),
+    reset: (nickname, baseVersion) =>
+      send(`${base(nickname)}/reset`, sendJson('POST', { baseVersion })),
   };
 }

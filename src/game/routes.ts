@@ -1,5 +1,6 @@
-// Hono routes of one game: /api/profiles/:nickname/games/:gameId (GET, POST), .../move, .../reset.
+// Hono routes of one game: /api/profiles/:nickname/games/:gameId (GET, PUT, POST), .../move, .../reset.
 import { type Context, Hono } from 'hono';
+import { z } from 'zod';
 import type { GameDefinition } from './index.ts';
 import type { GameFailure, GameResult, GameService } from './service.ts';
 
@@ -14,8 +15,12 @@ const FAILURES: Record<GameFailure, { status: 404 | 409; error: string }> = {
   'already-finished': { status: 409, error: 'game already finished' },
 };
 
+const baseVersion = z.number().int().min(1);
+const resetBody = z.object({ baseVersion });
+
 function respond<State>(c: Context, result: GameResult<State>): Response {
   if (result.ok) return c.json(result.game, 200);
+  if (result.reason === 'stale') return c.json({ error: 'stale', game: result.game }, 409);
   const failure = FAILURES[result.reason];
   return c.json({ error: failure.error }, failure.status);
 }
@@ -42,6 +47,46 @@ function profileGuard(profiles: ProfileLookup) {
   };
 }
 
+/** The handler of every route of one game, each for an already resolved profile. */
+function handlers<State, Move, Options>(
+  definition: GameDefinition<State, Move, Options>,
+  service: GameService<State, Move, Options>,
+) {
+  const moveBody = z.object({ baseVersion, move: definition.moveSchema });
+  const readOptions = async (c: Context) => definition.optionsSchema.safeParse(await readBody(c));
+  const invalid = (c: Context, error: string) => c.json({ error }, 400);
+
+  return {
+    get: async (c, profileId) => {
+      const game = await service.get(profileId);
+      return game === undefined ? c.json({ error: 'no active game' }, 404) : c.json(game, 200);
+    },
+    // Resume: the saved game (200), or a new one from the options when there is none (201).
+    resume: async (c, profileId) => {
+      const options = await readOptions(c);
+      if (!options.success) return invalid(c, 'invalid game options');
+      const { game, created } = await service.resume(profileId, options.data);
+      return c.json(game, created ? 201 : 200);
+    },
+    // New game, replacing any existing one.
+    start: async (c, profileId) => {
+      const options = await readOptions(c);
+      if (!options.success) return invalid(c, 'invalid game options');
+      return c.json(await service.start(profileId, options.data), 201);
+    },
+    move: async (c, profileId) => {
+      const body = moveBody.safeParse(await readBody(c));
+      if (!body.success) return invalid(c, 'invalid move request');
+      return respond(c, await service.move(profileId, body.data.move, body.data.baseVersion));
+    },
+    reset: async (c, profileId) => {
+      const body = resetBody.safeParse(await readBody(c));
+      if (!body.success) return invalid(c, 'invalid reset request');
+      return respond(c, await service.reset(profileId, body.data.baseVersion));
+    },
+  } satisfies Record<string, ProfileHandler>;
+}
+
 export function gameRoutes<State, Move, Options>(
   definition: GameDefinition<State, Move, Options>,
   service: GameService<State, Move, Options>,
@@ -49,38 +94,12 @@ export function gameRoutes<State, Move, Options>(
 ): Hono {
   const base = `/api/profiles/:nickname/games/${definition.id}`;
   const withProfile = profileGuard(profiles);
+  const handle = handlers(definition, service);
   const app = new Hono();
-
-  app.get(
-    base,
-    withProfile(async (c, profileId) => {
-      const game = await service.get(profileId);
-      return game === undefined ? c.json({ error: 'no active game' }, 404) : c.json(game, 200);
-    }),
-  );
-
-  app.post(
-    base,
-    withProfile(async (c, profileId) => {
-      const options = definition.optionsSchema.safeParse(await readBody(c));
-      if (!options.success) return c.json({ error: 'invalid game options' }, 400);
-      return c.json(await service.start(profileId, options.data), 201);
-    }),
-  );
-
-  app.post(
-    `${base}/move`,
-    withProfile(async (c, profileId) => {
-      const move = definition.moveSchema.safeParse(await readBody(c));
-      if (!move.success) return c.json({ error: 'invalid move request' }, 400);
-      return respond(c, await service.move(profileId, move.data));
-    }),
-  );
-
-  app.post(
-    `${base}/reset`,
-    withProfile(async (c, profileId) => respond(c, await service.reset(profileId))),
-  );
-
+  app.get(base, withProfile(handle.get));
+  app.put(base, withProfile(handle.resume));
+  app.post(base, withProfile(handle.start));
+  app.post(`${base}/move`, withProfile(handle.move));
+  app.post(`${base}/reset`, withProfile(handle.reset));
   return app;
 }

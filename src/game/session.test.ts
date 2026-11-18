@@ -4,7 +4,7 @@ import { describe, test } from 'node:test';
 import { type TallyState, tallyGame } from '../test-support/tally-game.ts';
 import { createGameApi } from './client.tsx';
 import type { SavedGame } from './index.ts';
-import { errorMessage, loadOrStart, runRequest, type SessionTarget } from './session.ts';
+import { errorMessage, runRequest, type SessionTarget } from './session.ts';
 
 const SAVED = {
   state: { count: 1, target: 5 },
@@ -12,16 +12,6 @@ const SAVED = {
   moves: 1,
   finished: false,
   version: 2,
-  startedAt: '2026-01-01T00:00:00.000Z',
-  finishedAt: null,
-};
-
-const FRESH = {
-  state: { count: 0, target: 5 },
-  initial: { count: 0, target: 5 },
-  moves: 0,
-  finished: false,
-  version: 1,
   startedAt: '2026-01-01T00:00:00.000Z',
   finishedAt: null,
 };
@@ -66,21 +56,6 @@ function pendingRequest() {
 const LIVE = () => true;
 
 describe('the game session', () => {
-  test('loadOrStart resumes the saved game', async () => {
-    const api = replying(Response.json(SAVED));
-
-    assert.deepEqual(await loadOrStart(api, 'Ada', { target: 5 }), SAVED);
-  });
-
-  test('loadOrStart starts a game when the profile has none', async () => {
-    const api = replying(
-      Response.json({ error: 'no active game' }, { status: 404 }),
-      Response.json(FRESH),
-    );
-
-    assert.deepEqual(await loadOrStart(api, 'Ada', { target: 5 }), FRESH);
-  });
-
   test('errorMessage of an unexpected error is a generic retry message', () => {
     assert.equal(errorMessage(new Error('boom')), 'Something went wrong. Try again.');
   });
@@ -116,10 +91,26 @@ describe('the game session', () => {
     const api = replying(Response.json({ error: 'illegal move' }, { status: 409 }));
 
     // When the move runs
-    await runRequest(target, LIVE, () => api.move('Ada', { add: 4 }));
+    await runRequest(target, LIVE, () => api.move('Ada', { add: 4 }, 2));
 
     // Then its message is shown
     assert.deepEqual(seen, { busy: false, message: 'illegal move' });
+  });
+
+  test('a stale request shows the current game from the server with a notice', async () => {
+    // Given a server where the game moved on in another tab
+    const { seen, target } = recorder();
+    const api = replying(Response.json({ error: 'stale', game: SAVED }, { status: 409 }));
+
+    // When a move from the outdated version runs
+    await runRequest(target, LIVE, () => api.move('Ada', { add: 1 }, 1));
+
+    // Then the session adopts the server's game and says why
+    assert.deepEqual(seen, {
+      busy: false,
+      message: 'This game changed somewhere else. Showing the latest.',
+      game: SAVED,
+    });
   });
 
   test('a response that arrives after the session moved on is ignored', async () => {

@@ -25,6 +25,10 @@ async function post(app: App, path: string, body: string): Promise<Response> {
   return app.request(path, { method: 'POST', body });
 }
 
+async function put(app: App, path: string, body: string): Promise<Response> {
+  return app.request(path, { method: 'PUT', body });
+}
+
 /** Ada's game after `body` started it. */
 async function started(body: string): Promise<App> {
   const app = await setup();
@@ -59,18 +63,36 @@ describe('the game routes', () => {
     assert.deepEqual(await res.json(), { error: 'invalid game options' });
   });
 
-  test('getting a saved game is 200 with the game', async () => {
-    const app = await started('{"target":3}');
+  test('resuming without a game is 201 with a game created from the options', async () => {
+    const app = await setup();
 
-    const res = await app.request(ADA_GAME);
+    const res = await put(app, ADA_GAME, '{"target":3}');
 
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 201);
     assert.deepEqual(await res.json(), {
       state: { count: 0, target: 3 },
       initial: { count: 0, target: 3 },
       moves: 0,
       finished: false,
       version: 1,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: null,
+    });
+  });
+
+  test('resuming an existing game is 200 with that game', async () => {
+    const app = await started('');
+    await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":2}}');
+
+    const res = await put(app, ADA_GAME, '');
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      state: { count: 2, target: 5 },
+      initial: { count: 0, target: 5 },
+      moves: 1,
+      finished: false,
+      version: 2,
       startedAt: '2026-01-01T00:00:00.000Z',
       finishedAt: null,
     });
@@ -85,12 +107,21 @@ describe('the game routes', () => {
     assert.deepEqual(await res.json(), { error: 'no active game' });
   });
 
-  test('a nickname in another casing finds the same profile', async () => {
-    const app = await started('');
+  test('getting the game with the nickname in another casing is 200 with the game', async () => {
+    const app = await started('{"target":3}');
 
     const res = await app.request('/api/profiles/ADA/games/tally');
 
     assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      state: { count: 0, target: 3 },
+      initial: { count: 0, target: 3 },
+      moves: 0,
+      finished: false,
+      version: 1,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: null,
+    });
   });
 
   test('an unknown nickname is 404', async () => {
@@ -102,10 +133,10 @@ describe('the game routes', () => {
     assert.deepEqual(await res.json(), { error: 'profile not found' });
   });
 
-  test('a legal move is 200 with the moved game', async () => {
+  test('a legal move from the current version is 200 with the moved game', async () => {
     const app = await started('');
 
-    const res = await post(app, `${ADA_GAME}/move`, '{"add":2}');
+    const res = await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":2}}');
 
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), {
@@ -119,10 +150,10 @@ describe('the game routes', () => {
     });
   });
 
-  test('a move body that is not JSON is 400', async () => {
+  test('a move body without a base version is 400', async () => {
     const app = await started('');
 
-    const res = await post(app, `${ADA_GAME}/move`, '{add');
+    const res = await post(app, `${ADA_GAME}/move`, '{"add":2}');
 
     assert.equal(res.status, 400);
     assert.deepEqual(await res.json(), { error: 'invalid move request' });
@@ -131,7 +162,7 @@ describe('the game routes', () => {
   test('a move without a game is 404', async () => {
     const app = await setup();
 
-    const res = await post(app, `${ADA_GAME}/move`, '{"add":1}');
+    const res = await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":1}}');
 
     assert.equal(res.status, 404);
     assert.deepEqual(await res.json(), { error: 'no active game' });
@@ -140,7 +171,7 @@ describe('the game routes', () => {
   test('an illegal move is 409', async () => {
     const app = await started('');
 
-    const res = await post(app, `${ADA_GAME}/move`, '{"add":4}');
+    const res = await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":4}}');
 
     assert.equal(res.status, 409);
     assert.deepEqual(await res.json(), { error: 'illegal move' });
@@ -148,19 +179,40 @@ describe('the game routes', () => {
 
   test('a move on a finished game is 409', async () => {
     const app = await started('{"target":1}');
-    await post(app, `${ADA_GAME}/move`, '{"add":1}');
+    await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":1}}');
 
-    const res = await post(app, `${ADA_GAME}/move`, '{"add":1}');
+    const res = await post(app, `${ADA_GAME}/move`, '{"baseVersion":2,"move":{"add":1}}');
 
     assert.equal(res.status, 409);
     assert.deepEqual(await res.json(), { error: 'game already finished' });
   });
 
-  test('a reset is 200 with the game back at its start', async () => {
+  test('a move from an outdated version is 409 stale with the current game', async () => {
     const app = await started('');
-    await post(app, `${ADA_GAME}/move`, '{"add":2}');
+    await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":2}}');
 
-    const res = await post(app, `${ADA_GAME}/reset`, '');
+    const res = await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":2}}');
+
+    assert.equal(res.status, 409);
+    assert.deepEqual(await res.json(), {
+      error: 'stale',
+      game: {
+        state: { count: 2, target: 5 },
+        initial: { count: 0, target: 5 },
+        moves: 1,
+        finished: false,
+        version: 2,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: null,
+      },
+    });
+  });
+
+  test('a reset from the current version is 200 with the game back at its start', async () => {
+    const app = await started('');
+    await post(app, `${ADA_GAME}/move`, '{"baseVersion":1,"move":{"add":2}}');
+
+    const res = await post(app, `${ADA_GAME}/reset`, '{"baseVersion":2}');
 
     assert.equal(res.status, 200);
     assert.deepEqual(await res.json(), {
@@ -172,5 +224,14 @@ describe('the game routes', () => {
       startedAt: '2026-01-01T00:00:00.000Z',
       finishedAt: null,
     });
+  });
+
+  test('a reset body without a base version is 400', async () => {
+    const app = await started('');
+
+    const res = await post(app, `${ADA_GAME}/reset`, '');
+
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: 'invalid reset request' });
   });
 });

@@ -24,12 +24,18 @@ export interface FeatureContext {
   enableTestRoutes: boolean;
 }
 
+/** A game id becomes a URL path segment, so anything else (a `:` would make a parameter) is refused. */
+const GAME_ID = /^[a-z0-9-]+$/;
+
 /** The routes of one game feature: its game routes, plus its test routes when enabled. */
 export function featureRoutes<State, Move, Options>(
   feature: ServerFeature<State, Move, Options>,
   context: FeatureContext,
 ): Hono {
   const { definition } = feature;
+  if (!GAME_ID.test(definition.id)) {
+    throw new Error(`game id "${definition.id}" must be lowercase letters, digits and dashes`);
+  }
   const service = createGameService(context.db, definition, context);
   const app = new Hono();
   app.route('/', gameRoutes(definition, service, context.profiles));

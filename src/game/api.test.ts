@@ -28,47 +28,72 @@ function recording(sent: unknown[]) {
 }
 
 describe('the game API client', () => {
-  test('a saved game in the response is returned parsed', async () => {
-    const api = answering(() => Response.json(SAVED));
-
-    assert.deepEqual(await api.load('Ada'), SAVED);
-  });
-
-  test('loading answers undefined when the server has no game', async () => {
-    const api = answering(() => Response.json({ error: 'no active game' }, { status: 404 }));
-
-    assert.equal(await api.load('Ada'), undefined);
-  });
-
-  test('a move sends the move as JSON to the move route of the profile and game', async () => {
+  test('resuming sends the options with PUT and returns the parsed game', async () => {
     // Given a server that records what it was sent
     const sent: unknown[] = [];
     const api = recording(sent);
 
-    // When Ana Lu moves
-    await api.move('Ana Lu', { add: 2 });
+    // When Ana Lu resumes
+    const game = await api.resume('Ana Lu', { target: 5 });
 
-    // Then the nickname is encoded and the body is the move
+    // Then the nickname is encoded, the body is the options, and the answer is the game
     assert.deepEqual(sent, [
-      '/api/profiles/Ana%20Lu/games/tally/move',
-      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"add":2}' },
+      '/api/profiles/Ana%20Lu/games/tally',
+      { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"target":5}' },
+    ]);
+    assert.deepEqual(game, SAVED);
+  });
+
+  test('a move and a reset send the version they were made on', async () => {
+    // Given a server that records what it was sent
+    const sent: unknown[] = [];
+    const api = recording(sent);
+
+    // When Ada moves from version 2, then resets from version 3
+    await api.move('Ada', { add: 2 }, 2);
+    await api.reset('Ada', 3);
+
+    // Then each body carries its base version
+    assert.deepEqual(sent, [
+      '/api/profiles/Ada/games/tally/move',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"baseVersion":2,"move":{"add":2}}',
+      },
+      '/api/profiles/Ada/games/tally/reset',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"baseVersion":3}',
+      },
     ]);
   });
 
   test('a 409 becomes a GameApiError with the status and the server message', async () => {
     const api = answering(() => Response.json({ error: 'illegal move' }, { status: 409 }));
 
-    await assert.rejects(api.move('Ada', { add: 4 }), {
+    await assert.rejects(api.move('Ada', { add: 4 }, 1), {
       name: 'GameApiError',
       status: 409,
       message: 'illegal move',
     });
   });
 
+  test('a stale 409 becomes a StaleGameError that carries the current game', async () => {
+    const api = answering(() => Response.json({ error: 'stale', game: SAVED }, { status: 409 }));
+
+    await assert.rejects(api.move('Ada', { add: 1 }, 1), {
+      name: 'StaleGameError',
+      status: 409,
+      game: SAVED,
+    });
+  });
+
   test('an error response without a message names the status', async () => {
     const api = answering(() => new Response('oops', { status: 500 }));
 
-    await assert.rejects(api.reset('Ada'), {
+    await assert.rejects(api.reset('Ada', 1), {
       status: 500,
       message: 'Request failed with status 500',
     });
@@ -87,7 +112,7 @@ describe('the game API client', () => {
   test('a response body that is not a saved game is rejected', async () => {
     const api = answering(() => Response.json({ state: 'nonsense' }));
 
-    await assert.rejects(api.load('Ada'), {
+    await assert.rejects(api.resume('Ada', { target: 5 }), {
       status: 200,
       message: 'Unexpected response from the server',
     });

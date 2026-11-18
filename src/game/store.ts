@@ -50,37 +50,51 @@ export async function readGame<State>(
   return row === undefined ? undefined : parseRow(row, schema);
 }
 
+type FreshGame = Omit<SavedGame<unknown>, 'version'>;
+
+const INSERT_COLUMNS = `INSERT INTO games (profile_id, game_id, state, initial, moves, finished, version, started_at, finished_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`;
+
+function insertParams(key: GameKey, game: FreshGame) {
+  return [
+    key.profileId,
+    key.gameId,
+    JSON.stringify(game.state),
+    JSON.stringify(game.initial),
+    game.moves,
+    game.finished ? 1 : 0,
+    game.startedAt,
+    game.finishedAt,
+    game.startedAt,
+  ];
+}
+
 /**
  * Inserts the game or replaces the existing one. The version keeps growing across replacements, so
  * a move that read the old game can never pass its compare-and-swap against the new one.
  * Returns the stored version.
  */
-export async function upsertGame(
-  db: Db,
-  key: GameKey,
-  game: Omit<SavedGame<unknown>, 'version'>,
-): Promise<number> {
+export async function upsertGame(db: Db, key: GameKey, game: FreshGame): Promise<number> {
   const rows = await db.all(
-    `INSERT INTO games (profile_id, game_id, state, initial, moves, finished, version, started_at, finished_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+    `${INSERT_COLUMNS}
        ON CONFLICT(profile_id, game_id) DO UPDATE SET
          state = excluded.state, initial = excluded.initial, moves = excluded.moves,
          finished = excluded.finished, version = games.version + 1, started_at = excluded.started_at,
          finished_at = excluded.finished_at, updated_at = excluded.updated_at
        RETURNING version`,
-    [
-      key.profileId,
-      key.gameId,
-      JSON.stringify(game.state),
-      JSON.stringify(game.initial),
-      game.moves,
-      game.finished ? 1 : 0,
-      game.startedAt,
-      game.finishedAt,
-      game.startedAt,
-    ],
+    insertParams(key, game),
   );
   return startedRows.parse(rows)[0].version;
+}
+
+/** Inserts the game at version 1 unless the profile already has one. True when it was inserted. */
+export async function insertIfAbsent(db: Db, key: GameKey, game: FreshGame): Promise<boolean> {
+  const { changes } = await db.run(
+    `${INSERT_COLUMNS}
+       ON CONFLICT(profile_id, game_id) DO NOTHING`,
+    insertParams(key, game),
+  );
+  return changes > 0;
 }
 
 /** Compare-and-swap: writes `next` only if the stored version is still `expectedVersion`. */
