@@ -14,10 +14,19 @@ interface Fixtures {
   otherBrowserPage: Page;
 }
 
+/**
+ * The ONE message that is not the app's: on a machine without a GPU (CI), Chrome draws WebGL in
+ * software and its GL driver logs this performance notice for the 3D board. It says nothing about
+ * our code. Anything else, including every other WebGL or three.js warning, still fails the test.
+ */
+const SOFTWARE_WEBGL_NOTICE =
+  /GL Driver Message \(OpenGL, Performance, [^)]*\): GPU stall due to ReadPixels/;
+
 /** Records every console error/warning and uncaught error of every page in `context`. */
 function watchConsole(context: BrowserContext, problems: string[]): void {
   context.on('console', (message) => {
     if (!PROBLEM_TYPES.has(message.type())) return;
+    if (SOFTWARE_WEBGL_NOTICE.test(message.text())) return;
     problems.push(`${message.type()}: ${message.text()} (${message.location().url})`);
   });
   context.on('weberror', (error) => problems.push(`pageerror: ${error.error().message}`));
