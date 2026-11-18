@@ -38,6 +38,8 @@ const cases: [string, string, boolean][] = [
   ['src/web/main.tsx', "import '../puzzle/client.tsx';", false],
   ['src/server/create-app.ts', "import '../game/client.tsx';", true],
   ['src/server/create-app.ts', "import '../puzzle/server.ts';", false],
+  ['src/server/create-app.test.ts', "import '../test-support/db.ts';", false], // root tests may use test-support
+  ['src/web/app.test.tsx', "import '../test-support/db.ts';", false],
   ['src/game/store.ts', "import '../server/create-app.ts';", true], // modules never import roots
 ];
 

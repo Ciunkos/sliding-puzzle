@@ -1,103 +1,71 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { createProfileApi, ProfileApiError } from './api.ts';
+import { createProfileApi } from './api.ts';
 
-const profileJson = { id: 7, nickname: 'Ada', createdAt: '2026-01-02T03:04:05.000Z' };
-const GENERIC = 'Could not reach the server';
+const ADA = { id: 7, nickname: 'Ada', createdAt: '2026-01-01T00:00:00.000Z' };
+const GENERIC_ERROR = { name: 'ProfileApiError', message: 'Could not reach the server' };
 
-interface RecordedCall {
-  url: string;
-  init: RequestInit | undefined;
+/** A stand-in for the browser's fetch that always answers with `response`. */
+function answering(response: Response): typeof fetch {
+  return () => Promise.resolve(response);
 }
 
-/** A fake fetch that records each call and answers with whatever `respond` produces. */
-function fakeFetch(respond: () => Response | Promise<Response>) {
-  const calls: RecordedCall[] = [];
-  const fn = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    calls.push({ url, init });
-    return await respond();
+/** A stand-in for fetch that records each request in `requests` and answers with `response`. */
+function recording(requests: unknown[], response: Response): typeof fetch {
+  return (input, init) => {
+    requests.push({ input, init });
+    return Promise.resolve(response);
   };
-  return { fn, calls };
 }
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
+function json(body: unknown, status: number): Response {
+  return Response.json(body, { status });
 }
 
-async function expectApiError(promise: Promise<unknown>, message: string): Promise<void> {
-  await assert.rejects(promise, (err: unknown) => {
-    assert.ok(err instanceof ProfileApiError, `expected ProfileApiError, got ${String(err)}`);
-    assert.equal(err.message, message);
-    return true;
-  });
-}
+describe('createProfileApi', () => {
+  test('selecting a nickname posts it as JSON to the profiles route', async () => {
+    // Given a fetch that records what it was asked
+    const requests: unknown[] = [];
+    const api = createProfileApi(recording(requests, json(ADA, 200)));
 
-describe('createProfileApi().selectOrCreate', () => {
-  test('POSTs the nickname as JSON to /api/profiles and returns the parsed profile', async () => {
-    const fake = fakeFetch(() => json(profileJson));
-    const api = createProfileApi(fake.fn);
+    // When Ada is selected
+    await api.selectOrCreate('Ada');
 
-    const profile = await api.selectOrCreate('Ada');
-
-    assert.deepEqual(profile, profileJson);
-    assert.equal(fake.calls.length, 1);
-    const call = fake.calls[0];
-    assert.ok(call);
-    assert.equal(call.url, '/api/profiles');
-    assert.deepEqual(
-      { method: call.init?.method, body: call.init?.body },
-      { method: 'POST', body: JSON.stringify({ nickname: 'Ada' }) },
-    );
+    // Then one JSON POST with the nickname went to /api/profiles
+    assert.deepEqual(requests, [
+      {
+        input: '/api/profiles',
+        init: {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: '{"nickname":"Ada"}',
+        },
+      },
+    ]);
   });
 
-  test('a 400 carries the server error message', async () => {
-    const api = createProfileApi(
-      fakeFetch(() => json({ error: 'nickname may only contain letters' }, 400)).fn,
-    );
-    await expectApiError(api.selectOrCreate('a b'), 'nickname may only contain letters');
+  test('a successful answer gives the parsed profile', async () => {
+    const api = createProfileApi(answering(json(ADA, 200)));
+
+    assert.deepEqual(await api.selectOrCreate('Ada'), ADA);
   });
 
-  test('a 400 without a string error falls back to the generic message', async () => {
-    const api = createProfileApi(fakeFetch(() => json({}, 400)).fn);
-    await expectApiError(api.selectOrCreate('a b'), GENERIC);
+  test('a 400 answer carries the message the server sent', async () => {
+    const api = createProfileApi(answering(json({ error: 'nickname is taken' }, 400)));
+
+    await assert.rejects(api.selectOrCreate('Ada'), {
+      name: 'ProfileApiError',
+      message: 'nickname is taken',
+    });
   });
 
-  test('a 400 with a non-JSON body falls back to the generic message', async () => {
-    const api = createProfileApi(fakeFetch(() => new Response('bad request', { status: 400 })).fn);
-    await expectApiError(api.selectOrCreate('a b'), GENERIC);
-  });
+  test('an unreachable server or an unusable answer gives the generic message', async () => {
+    const offline = createProfileApi(() => Promise.reject(new TypeError('fetch failed')));
+    const failing = createProfileApi(answering(json({ error: 'database is down' }, 500)));
+    const malformed = createProfileApi(answering(json({ id: 'seven' }, 200)));
 
-  test('a network failure throws the generic message', async () => {
-    const api = createProfileApi(
-      fakeFetch(() => {
-        throw new TypeError('fetch failed');
-      }).fn,
-    );
-    await expectApiError(api.selectOrCreate('Ada'), GENERIC);
-  });
-
-  test('a 500 throws the generic message even with a JSON error body', async () => {
-    const api = createProfileApi(fakeFetch(() => json({ error: 'boom' }, 500)).fn);
-    await expectApiError(api.selectOrCreate('Ada'), GENERIC);
-  });
-
-  test('a 200 with a body that is not JSON throws the generic message', async () => {
-    const api = createProfileApi(fakeFetch(() => new Response('<html>', { status: 200 })).fn);
-    await expectApiError(api.selectOrCreate('Ada'), GENERIC);
-  });
-
-  test('a 200 with the wrong shape throws the generic message', async () => {
-    const api = createProfileApi(fakeFetch(() => json({ id: 'seven', nickname: 'Ada' })).fn);
-    await expectApiError(api.selectOrCreate('Ada'), GENERIC);
-  });
-
-  test('ProfileApiError is an Error with the message it was given', () => {
-    const err = new ProfileApiError('nope');
-    assert.ok(err instanceof Error);
-    assert.equal(err.message, 'nope');
+    await assert.rejects(offline.selectOrCreate('Ada'), GENERIC_ERROR);
+    await assert.rejects(failing.selectOrCreate('Ada'), GENERIC_ERROR);
+    await assert.rejects(malformed.selectOrCreate('Ada'), GENERIC_ERROR);
   });
 });

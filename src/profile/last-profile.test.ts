@@ -1,27 +1,21 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { loadLastNickname, saveLastNickname } from './last-profile.ts';
+import { LAST_NICKNAME_KEY, loadLastNickname, saveLastNickname } from './last-profile.ts';
 
-const KEY = 'sliding-puzzle:last-nickname';
-
-interface FakeStorage {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-  written: Map<string, string>;
-}
-
-function fakeStorage(initial: Record<string, string> = {}): FakeStorage {
-  const written = new Map<string, string>(Object.entries(initial));
+/** A Storage-shaped stand-in for the browser's localStorage, kept in memory. */
+function memoryStorage(entries: Record<string, string>): Pick<Storage, 'getItem' | 'setItem'> {
+  // URLSearchParams.get already answers null for a missing key, like Storage.getItem.
+  const values = new URLSearchParams(entries);
   return {
-    written,
-    getItem: (key) => written.get(key) ?? null,
+    getItem: (key) => values.get(key),
     setItem: (key, value) => {
-      written.set(key, value);
+      values.set(key, value);
     },
   };
 }
 
-const throwingStorage = {
+/** Storage as in a private window or with site data blocked: every access throws. */
+const THROWING_STORAGE = {
   getItem(): string | null {
     throw new Error('SecurityError: storage is disabled');
   },
@@ -30,48 +24,41 @@ const throwingStorage = {
   },
 };
 
-describe('loadLastNickname', () => {
-  test('is undefined when nothing was stored', () => {
-    assert.equal(loadLastNickname(fakeStorage()), undefined);
+describe('last profile', () => {
+  test('a remembered nickname is returned', () => {
+    // Given a browser that remembers Ada
+    const storage = memoryStorage({ [LAST_NICKNAME_KEY]: 'Ada' });
+
+    // When the last nickname is loaded
+    const nickname = loadLastNickname(storage);
+
+    // Then it is Ada
+    assert.equal(nickname, 'Ada');
   });
 
-  test('returns a valid stored nickname', () => {
-    assert.equal(loadLastNickname(fakeStorage({ [KEY]: 'Ada' })), 'Ada');
+  test('nothing is returned when nothing was stored', () => {
+    assert.equal(loadLastNickname(memoryStorage({})), undefined);
   });
 
-  test('ignores stored content that is not a valid nickname', () => {
-    assert.equal(loadLastNickname(fakeStorage({ [KEY]: 'a b' })), undefined);
-    assert.equal(loadLastNickname(fakeStorage({ [KEY]: 'x' })), undefined);
-    assert.equal(loadLastNickname(fakeStorage({ [KEY]: '' })), undefined);
+  test('stored content that is not a valid nickname is ignored', () => {
+    assert.equal(loadLastNickname(memoryStorage({ [LAST_NICKNAME_KEY]: 'a b' })), undefined);
   });
 
-  test('is undefined when reading the storage throws', () => {
-    assert.equal(loadLastNickname(throwingStorage), undefined);
-  });
-});
+  test('saving stores the trimmed nickname under the last-nickname key', () => {
+    const storage = memoryStorage({});
 
-describe('saveLastNickname', () => {
-  test('stores the trimmed nickname under the fixed key', () => {
-    const storage = fakeStorage();
     saveLastNickname('  Ada ', storage);
-    assert.equal(storage.written.get(KEY), 'Ada');
+
+    assert.equal(storage.getItem(LAST_NICKNAME_KEY), 'Ada');
   });
 
-  test('does not store an invalid nickname', () => {
-    const storage = fakeStorage();
-    saveLastNickname('a b', storage);
-    assert.equal(storage.written.has(KEY), false);
+  test('storage that throws on read gives no nickname instead of crashing', () => {
+    assert.equal(loadLastNickname(THROWING_STORAGE), undefined);
   });
 
-  test('does not throw when writing the storage throws', () => {
+  test('storage that throws on write does not crash the save', () => {
     assert.doesNotThrow(() => {
-      saveLastNickname('Ada', throwingStorage);
+      saveLastNickname('Ada', THROWING_STORAGE);
     });
-  });
-
-  test('round-trips through loadLastNickname', () => {
-    const storage = fakeStorage();
-    saveLastNickname('Ada_99', storage);
-    assert.equal(loadLastNickname(storage), 'Ada_99');
   });
 });

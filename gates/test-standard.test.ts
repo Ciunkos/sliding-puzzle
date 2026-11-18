@@ -555,3 +555,15 @@ describe('a shared contract in test-support', () => {
     assert.equal((await hits(CONTRACT, code, 'test-standard/test-shape')).length, 0);
   });
 });
+
+describe('a composition root test', () => {
+  test('may import the pins file of its own folder', async () => {
+    const code = `import { features } from './features.ts';\n${inTest(ok)}`;
+    const found = await hits(
+      'src/server/create-app.test.ts',
+      code,
+      'test-standard/allowed-imports',
+    );
+    assert.equal(found.length, 0);
+  });
+});

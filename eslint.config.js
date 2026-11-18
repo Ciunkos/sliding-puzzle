@@ -152,7 +152,7 @@ export default defineConfig(
     rules: restrict([
       ...noClientFromServer,
       group(
-        '^\\.\\./[^/]+/(?!(index|server)\\.ts$)',
+        '^\\.\\./(?!test-support/)[^/]+/(?!(index|server)\\.ts$)',
         'Import only index.ts or server.ts of a module.',
       ),
       group('^\\.\\./web(/|$)', 'server must not import web.'),
@@ -164,7 +164,7 @@ export default defineConfig(
     rules: restrict([
       ...noServerFromClient,
       group(
-        '^\\.\\./[^/]+/(?!(index\\.ts|client\\.tsx)$)',
+        '^\\.\\./(?!test-support/)[^/]+/(?!(index\\.ts|client\\.tsx)$)',
         'Import only index.ts or client.tsx of a module.',
       ),
       group('^\\.\\./(db|server)(/|$)', 'web must not import db or server.'),

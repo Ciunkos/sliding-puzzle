@@ -328,7 +328,14 @@ const UNIT_PACKAGES = new Set([
   'react',
   'react-dom/server',
 ]);
-const OWN_ENTRIES = new Set(['./index.ts', './server.ts', './client.tsx']);
+// features.ts(x) is the pins file of a composition root: its public wiring.
+const OWN_ENTRIES = new Set([
+  './index.ts',
+  './server.ts',
+  './client.tsx',
+  './features.ts',
+  './features.tsx',
+]);
 const TEST_SUPPORT = /^\.\.\/test-support\/[\w.-]+\.ts$/;
 const OTHER_PUBLIC_ENTRY = /^\.\.\/[\w-]+\/(index\.ts|server\.ts|client\.tsx)$/;
 const E2E_PACKAGES = new Set(['@playwright/test', '@axe-core/playwright']);
