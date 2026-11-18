@@ -78,6 +78,12 @@ export function dbContract(name: string, makeDb: () => Promise<Db> | Db): void {
       ]);
     });
 
+    void test('an empty batch resolves and changes nothing', async () => {
+      const db = await withTable();
+      await db.batch([]);
+      assert.deepEqual(await db.all('SELECT label FROM items'), []);
+    });
+
     void test('batch rolls back everything when one statement fails', async () => {
       const db = await withTable();
       await db.run("INSERT INTO items (label, qty) VALUES ('kept', 0)");

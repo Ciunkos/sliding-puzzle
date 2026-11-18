@@ -60,6 +60,8 @@ export function createD1Db(binding: D1Like): Db {
       return toRow(row);
     },
     async batch(statements) {
+      // D1 rejects an empty batch ("No SQL statements detected"); the port treats it as a no-op.
+      if (statements.length === 0) return;
       // D1 batch() runs its statements in one transaction and rolls back on any failure.
       await binding.batch(statements.map((s) => prepare(s.sql, s.params)));
     },

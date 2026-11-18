@@ -1,57 +1,52 @@
-import { DatabaseSync } from 'node:sqlite';
+// Runs the shared Db contract against a real local D1 (workerd via Miniflare), not a fake, so the
+// atomicity case checks D1's own batch() transaction and our driver's use of it.
+import { after, before } from 'node:test';
+import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { dbContract } from './contract.ts';
 import { createD1Db } from './index.ts';
-import type { D1Like, D1PreparedLike, SqlParam } from './index.ts';
+import type { D1Like } from './index.ts';
 
-/** Runs a synchronous body; anything it throws becomes a rejected promise, like a real binding. */
-function attempt<T>(body: () => T): Promise<T> {
-  return new Promise((resolve) => {
-    resolve(body());
-  });
-}
+// One binding per contract case gives every case a fresh, empty database without restarting
+// workerd. Raise this if the contract grows past it; makeDb fails loudly when the pool runs out.
+const POOL_SIZE = 32;
+const bindings = Array.from({ length: POOL_SIZE }, (_, i) => `DB_${String(i)}`);
 
-/** Fake D1 binding backed by an in-memory node:sqlite database; batch() is transactional like D1. */
-function fakeD1(sqlite: DatabaseSync): D1Like {
-  function prepare(sql: string): D1PreparedLike {
-    let bound: SqlParam[] = [];
-    const stmt: D1PreparedLike = {
-      bind(...values: SqlParam[]) {
-        bound = values;
-        return stmt;
-      },
-      run() {
-        return attempt(() => {
-          const result = sqlite.prepare(sql).run(...bound);
-          return { meta: { changes: Number(result.changes) } };
-        });
-      },
-      all() {
-        return attempt(() => ({ results: sqlite.prepare(sql).all(...bound) }));
-      },
-      first() {
-        return attempt(() => sqlite.prepare(sql).get(...bound) ?? null);
-      },
-    };
-    return stmt;
+/** miniflare types the binding with @cloudflare/workers-types, which is not installed: check it. */
+function asD1(value: unknown): D1Like {
+  if (typeof value !== 'object' || value === null) throw new TypeError('not a D1 binding');
+  const { prepare, batch } = value as Record<string, unknown>;
+  if (typeof prepare !== 'function' || typeof batch !== 'function') {
+    throw new TypeError('D1 binding lacks prepare() or batch()');
   }
-
-  return {
-    prepare,
-    async batch(stmts: D1PreparedLike[]) {
-      sqlite.exec('BEGIN');
-      try {
-        const results: unknown[] = [];
-        for (const stmt of stmts) {
-          results.push(await stmt.run());
-        }
-        sqlite.exec('COMMIT');
-        return results;
-      } catch (error) {
-        sqlite.exec('ROLLBACK');
-        throw error;
-      }
-    },
-  };
+  return value as D1Like;
 }
 
-dbContract('createD1Db (fake binding)', () => createD1Db(fakeD1(new DatabaseSync(':memory:'))));
+let mf: Miniflare | undefined;
+let next = 0;
+
+before(async () => {
+  // No persistence path: Miniflare keeps D1 in a temp dir under os.tmpdir() and removes it on dispose.
+  mf = new Miniflare(
+    convertV4MiniflareOptions({
+      modules: true,
+      compatibilityDate: '2026-11-01',
+      script: 'export default { fetch: () => new Response(null, { status: 404 }) };',
+      d1Databases: bindings,
+    }),
+  );
+  await mf.ready;
+});
+
+after(async () => {
+  await mf?.dispose();
+});
+
+dbContract('createD1Db (Miniflare D1)', async () => {
+  const name = bindings[next];
+  next += 1;
+  if (mf === undefined) throw new Error('Miniflare is not started');
+  if (name === undefined) {
+    throw new Error(`D1 pool exhausted: raise POOL_SIZE above ${String(POOL_SIZE)}`);
+  }
+  return createD1Db(asD1(await mf.getD1Database(name)));
+});
