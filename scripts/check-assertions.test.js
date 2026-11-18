@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hasReason, needsReason, parseNumstat } from './check-assertions.js';
+import { hasReason, logArgs, needsReason, parseNumstat } from './check-assertions.js';
 
 test('numstat lines become path, added and deleted counts', () => {
   assert.deepEqual(parseNumstat('3\t1\tsrc/puzzle/rules.ts\n0\t2\tsrc/puzzle/rules.test.ts\n'), [
@@ -55,4 +55,23 @@ test('test-support files are test code, not production code', () => {
     { path: 'src/db/migrate.test.ts', added: 5, deleted: 9 },
   ];
   assert.equal(needsReason(changes), false);
+});
+
+test('a range is listed without merges', () => {
+  assert.deepEqual(logArgs('abc..HEAD', undefined), [
+    'log',
+    '--format=%H',
+    '--no-merges',
+    'abc..HEAD',
+  ]);
+});
+
+test('commits made before the guard existed are left out of the range', () => {
+  assert.deepEqual(logArgs('abc..HEAD', '6780253'), [
+    'log',
+    '--format=%H',
+    '--no-merges',
+    'abc..HEAD',
+    '^6780253',
+  ]);
 });

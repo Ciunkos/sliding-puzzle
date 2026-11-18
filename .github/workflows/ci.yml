@@ -31,7 +31,8 @@ jobs:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           if git cat-file -e "$BASE^{commit}" 2>/dev/null; then
-            node scripts/check-assertions.js --range "$BASE..HEAD"
+            # 6780253 introduced this guard; commits before it are not judged by it.
+            node scripts/check-assertions.js --range "$BASE..HEAD" --since 6780253
           else
             echo "No base commit to compare with (first push); skipped."
           fi

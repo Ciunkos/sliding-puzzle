@@ -2,7 +2,8 @@
 // production code must say why, with a "Reason: ..." line in the commit message. Agents (and people)
 // make a red test green by editing the test; this makes that visible and deliberate.
 //   node scripts/check-assertions.js --msg <file>          staged changes + the message being written
-//   node scripts/check-assertions.js --range <base>..<head> every commit in the range (CI)
+//   node scripts/check-assertions.js --range <base>..<head> [--since <commit>]  every commit in the
+//     range (CI); --since leaves out the commit that introduced the guard and everything before it
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
@@ -59,8 +60,21 @@ function checkMessage(file) {
   return needsReason(changes) && !hasReason(message) ? [`this commit: ${PROBLEM}`] : [];
 }
 
-function checkRange(range) {
-  const commits = git('log', '--format=%H', '--no-merges', range).split('\n').filter(Boolean);
+/**
+ * git arguments listing the commits to judge. `since` names the commit that introduced this guard:
+ * it and everything before it are left out, because a rule does not judge what predates it.
+ * @param {string} range
+ * @param {string | undefined} since
+ */
+export function logArgs(range, since) {
+  const args = ['log', '--format=%H', '--no-merges', range];
+  return since === undefined ? args : [...args, `^${since}`];
+}
+
+function checkRange(range, since) {
+  const commits = git(...logArgs(range, since))
+    .split('\n')
+    .filter(Boolean);
   return commits.flatMap((hash) => {
     const changes = parseNumstat(git('show', '--numstat', '--format=', hash));
     const message = git('log', '-1', '--format=%B', hash);
@@ -69,13 +83,18 @@ function checkRange(range) {
 }
 
 function main() {
-  const [mode, argument] = process.argv.slice(2);
+  const [mode, argument, sinceFlag, since] = process.argv.slice(2);
   if ((mode !== '--msg' && mode !== '--range') || argument === undefined) {
-    console.error('usage: check-assertions.js --msg <file> | --range <base>..<head>');
+    console.error(
+      'usage: check-assertions.js --msg <file> | --range <base>..<head> [--since <commit>]',
+    );
     process.exitCode = 2;
     return;
   }
-  const problems = mode === '--msg' ? checkMessage(argument) : checkRange(argument);
+  const problems =
+    mode === '--msg'
+      ? checkMessage(argument)
+      : checkRange(argument, sinceFlag === '--since' ? since : undefined);
   report('check-assertions', problems, 'no unexplained test edits');
 }
 
