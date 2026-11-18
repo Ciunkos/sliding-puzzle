@@ -2,24 +2,30 @@
 import js from '@eslint/js';
 import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
+import { productionLimits } from './eslint.test-standard.js';
 
 /**
- * ARCHITECTURE RULES (modular monolith). See README.md "Boundaries".
+ * ARCHITECTURE RULES (modular monolith). See AGENTS.md.
  *
- * Feature modules: src/puzzle, src/profile, src/game, src/db.
+ * Foundations: src/db, src/profile, src/game (a generic game engine that knows no particular game).
+ * Features: src/puzzle. A feature plugs into the foundations and must be deletable: remove its
+ * folder and its `// pin:` lines in the composition roots, and the project still compiles
+ * (scripts/check-deletion.js proves it).
  * Composition roots: src/server, src/web (the only places that wire modules together).
  * A module's public entry points are index.ts (isomorphic), server.ts and client.tsx.
  * Everything else inside a module is private. Duplicate a little instead of reaching in.
  */
 
-/** Which other feature modules each module may depend on (through public entry points only). */
+/** Which other modules each module may depend on (through public entry points only). */
 const MODULE_DEPS = {
-  puzzle: [],
   db: [],
   profile: ['db'],
-  game: ['puzzle', 'profile', 'db'],
+  game: ['db', 'profile'],
+  puzzle: ['game', 'profile'],
 };
 const FEATURES = Object.keys(MODULE_DEPS);
+/** Game rules stay free of every dependency, so they run anywhere and are trivially testable. */
+const PURE_FILES = ['src/puzzle/rules.ts', 'src/puzzle/shuffle.ts', 'src/puzzle/rng.ts'];
 const ENTRY = '(index|server|client)\\.tsx?$';
 
 const group = (regex, message) => ({ regex, message });
@@ -30,7 +36,7 @@ function moduleImportRules(name) {
   const forbiddenModules = FEATURES.filter((m) => m !== name && !allowed.includes(m));
   return [
     group(
-      `^\\.\\./[^/]+/(?!${ENTRY})`,
+      `^\\.\\./(?!test-support/)[^/]+/(?!${ENTRY})`,
       'Deep import into another module. Import only its index.ts, server.ts or client.tsx.',
     ),
     group('^\\.\\./(server|web)(/|$)', 'Feature modules must not import composition roots.'),
@@ -62,29 +68,9 @@ const restrict = (patterns) => ({
 
 const featureConfigs = FEATURES.flatMap((name) => {
   const base = moduleImportRules(name);
-  const extra =
-    name === 'puzzle'
-      ? [group('^(?!\\./)', 'puzzle is pure: only relative imports inside src/puzzle.')]
-      : name === 'db'
-        ? [group('^\\.\\./', 'db must not import other modules.')]
-        : [];
+  const extra = name === 'db' ? [group('^\\.\\./', 'db must not import other modules.')] : [];
   return [
     { files: [`src/${name}/**/*.{ts,tsx}`], rules: restrict([...base, ...extra]) },
-    // Tests may use the native Node test runner even in pure modules.
-    ...(name === 'puzzle'
-      ? [
-          {
-            files: ['src/puzzle/**/*.test.ts'],
-            rules: restrict([
-              ...base,
-              group(
-                '^(?!\\./|node:test$|node:assert(/strict)?$)',
-                'puzzle tests: only relative imports, node:test and node:assert.',
-              ),
-            ]),
-          },
-        ]
-      : []),
     {
       files: [`src/${name}/server.ts`],
       rules: restrict([...base, ...extra, ...noClientFromServer]),
@@ -96,8 +82,46 @@ const featureConfigs = FEATURES.flatMap((name) => {
   ];
 });
 
+const pureConfig = {
+  files: PURE_FILES,
+  rules: restrict([
+    ...moduleImportRules('puzzle'),
+    group('^(?!\\./)', 'Game rules are pure: only relative imports inside src/puzzle.'),
+  ]),
+};
+
+/** Test-only code stays out of production files. A separate rule id, so it adds to the rules above. */
+const noTestCodeInProduction = {
+  files: ['src/**/*.{ts,tsx}'],
+  ignores: ['src/**/*.test.{ts,tsx}', 'src/test-support/**'],
+  rules: {
+    '@typescript-eslint/no-restricted-imports': [
+      'error',
+      {
+        patterns: [
+          group(
+            '(^|/)test-support/',
+            'test-support is for tests only. Move shared production code into a module.',
+          ),
+          group('^(fast-check|node:test|node:assert)', 'Test libraries are for test files only.'),
+        ],
+      },
+    ],
+  },
+};
+
 export default defineConfig(
-  { ignores: ['dist', 'node_modules', 'playwright-report', 'test-results'] },
+  {
+    ignores: [
+      'dist',
+      'node_modules',
+      'playwright-report',
+      'test-results',
+      '.stryker-tmp',
+      'reports',
+      '.wrangler',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
   ...tseslint.configs.stylisticTypeChecked,
@@ -116,6 +140,9 @@ export default defineConfig(
     },
   },
   ...featureConfigs,
+  pureConfig,
+  noTestCodeInProduction,
+  ...productionLimits,
   {
     // Composition root: server wires module server.ts entries; never client code or web.
     files: ['src/server/**/*.ts'],
@@ -142,7 +169,7 @@ export default defineConfig(
   },
   { files: ['**/*.js'], extends: [tseslint.configs.disableTypeChecked] },
   {
-    files: ['**/*.test.ts', 'e2e/**/*.ts'],
+    files: ['**/*.test.{ts,tsx}', 'e2e/**/*.ts'],
     rules: { 'no-console': 'off', '@typescript-eslint/no-floating-promises': 'off' },
   },
   {

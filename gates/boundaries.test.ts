@@ -12,23 +12,30 @@ async function lint(filePath: string, code: string) {
     ],
   });
   const [result] = await eslint.lintText(code, { filePath });
-  return (result?.messages ?? []).filter((m) => m.ruleId === 'no-restricted-imports');
+  return (result?.messages ?? []).filter(
+    (m) => m.ruleId?.endsWith('no-restricted-imports') === true,
+  );
 }
 
 const cases: [string, string, boolean][] = [
   ['src/game/store.ts', "import '../profile/store.ts';", true], // deep import
   ['src/game/store.ts', "import '../profile/index.ts';", false],
   ['src/profile/store.ts', "import '../game/index.ts';", true], // not in allowlist
-  ['src/puzzle/board.ts', "import { z } from 'zod'; export { z };", true], // puzzle is pure
-  ['src/puzzle/board.test.ts', "import 'node:test'; import 'node:assert/strict';", false], // tests may use the runner
-  ['src/puzzle/board.test.ts', "import 'zod';", true],
+  ['src/game/engine.ts', "import '../puzzle/index.ts';", true], // the engine never knows a feature
+  ['src/profile/store.ts', "import '../puzzle/index.ts';", true], // nor does any foundation
+  ['src/puzzle/definition.ts', "import '../game/index.ts';", false], // a feature plugs into the engine
+  ['src/puzzle/rules.ts', "import { z } from 'zod'; export { z };", true], // game rules are pure
+  ['src/puzzle/definition.ts', "import { z } from 'zod'; export { z };", false],
+  ['src/puzzle/rules.test.ts', "import '../test-support/grid.ts';", false], // tests may use test-support
+  ['src/game/store.ts', "import '../test-support/db.ts';", true], // production code may not
+  ['src/game/store.ts', "import fc from 'fast-check'; export { fc };", true],
   ['src/db/driver.ts', "import '../game/index.ts';", true],
   ['src/game/server.ts', "import '../game/client.tsx';", true], // server <-> client
   ['src/game/client.tsx', "import 'node:fs';", true],
   ['src/web/main.tsx', "import '../game/server.ts';", true],
-  ['src/web/main.tsx', "import '../game/client.tsx';", false],
+  ['src/web/main.tsx', "import '../puzzle/client.tsx';", false],
   ['src/server/create-app.ts', "import '../game/client.tsx';", true],
-  ['src/server/create-app.ts', "import '../game/server.ts';", false],
+  ['src/server/create-app.ts', "import '../puzzle/server.ts';", false],
   ['src/game/store.ts', "import '../server/create-app.ts';", true], // modules never import roots
 ];
 
