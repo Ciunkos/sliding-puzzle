@@ -30,6 +30,8 @@ const cases: [string, string, boolean][] = [
   ['src/game/store.ts', "import '../test-support/db.ts';", true], // production code may not
   ['src/game/store.ts', "import fc from 'fast-check'; export { fc };", true],
   ['src/db/driver.ts', "import '../game/index.ts';", true],
+  ['src/db/index.test.ts', "import '../test-support/d1.ts';", false], // db tests may use test-support
+  ['src/db/driver.ts', "import '../test-support/d1.ts';", true],
   ['src/game/server.ts', "import '../game/client.tsx';", true], // server <-> client
   ['src/game/client.tsx', "import 'node:fs';", true],
   ['src/web/main.tsx', "import '../game/server.ts';", true],

@@ -68,7 +68,8 @@ const restrict = (patterns) => ({
 
 const featureConfigs = FEATURES.flatMap((name) => {
   const base = moduleImportRules(name);
-  const extra = name === 'db' ? [group('^\\.\\./', 'db must not import other modules.')] : [];
+  const extra =
+    name === 'db' ? [group('^\\.\\./(?!test-support/)', 'db must not import other modules.')] : [];
   return [
     { files: [`src/${name}/**/*.{ts,tsx}`], rules: restrict([...base, ...extra]) },
     {

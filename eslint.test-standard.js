@@ -105,6 +105,16 @@ function codeLines(sourceCode, node) {
   return lines.size;
 }
 
+/** A contract helper: a function whose whole body is one describe(...) call holding the tests. */
+function wrapsOnlyDescribe(fn) {
+  const body = fn.body;
+  if (body.type !== 'BlockStatement') return isDescribeCall(body);
+  const [only, ...rest] = body.body;
+  return (
+    rest.length === 0 && only?.type === 'ExpressionStatement' && isDescribeCall(only.expression)
+  );
+}
+
 /** @type {RuleModule} */
 const testShape = {
   meta: {
@@ -180,7 +190,7 @@ const testShape = {
       },
       /** Size limits for every function except describe callbacks (they hold the tests). */
       ':function'(/** @type {any} */ fn) {
-        if (isDescribeCall(fn.parent)) return;
+        if (isDescribeCall(fn.parent) || wrapsOnlyDescribe(fn)) return;
         const statements = fn.body.type === 'BlockStatement' ? fn.body.body.length : 1;
         if (statements > maxStatements) {
           const data = { count: String(statements), max: String(maxStatements) };

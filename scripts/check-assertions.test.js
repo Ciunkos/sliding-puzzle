@@ -48,3 +48,11 @@ test('a missing or empty Reason is rejected', () => {
   assert.equal(hasReason('Fix plural\n\nReason: ok\n'), false);
   assert.equal(hasReason('Fix plural, tests updated\n'), false);
 });
+
+test('test-support files are test code, not production code', () => {
+  const changes = [
+    { path: 'src/test-support/d1.ts', added: 30, deleted: 0 },
+    { path: 'src/db/migrate.test.ts', added: 5, deleted: 9 },
+  ];
+  assert.equal(needsReason(changes), false);
+});

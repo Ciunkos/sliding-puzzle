@@ -546,4 +546,12 @@ describe('a shared contract in test-support', () => {
     const code = inTest(ok);
     assert.equal((await hits(CONTRACT, code, 'test-standard/max-lines-per-function')).length, 0);
   });
+
+  test('may wrap its describe in one exported function of any length', async () => {
+    const cases = "test('the port does the thing', () => {\n  assert.equal(1, 1);\n});\n".repeat(
+      12,
+    );
+    const code = `${HEAD}export function dbContract(name: string): void {\n  describe(name, () => {\n${cases}  });\n}\n`;
+    assert.equal((await hits(CONTRACT, code, 'test-standard/test-shape')).length, 0);
+  });
 });

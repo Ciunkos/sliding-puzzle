@@ -29,7 +29,12 @@ export function parseNumstat(numstat) {
  */
 export function needsReason(changes) {
   const editedTests = changes.some((c) => TEST_FILE.test(c.path) && c.deleted > 0);
-  const production = changes.some((c) => c.path.startsWith('src/') && !TEST_FILE.test(c.path));
+  const production = changes.some(
+    (c) =>
+      c.path.startsWith('src/') &&
+      !c.path.startsWith('src/test-support/') &&
+      !TEST_FILE.test(c.path),
+  );
   return editedTests && production;
 }
 
