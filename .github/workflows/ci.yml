@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check (format, lint, types, tests, gates, build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # No install scripts: they are how npm supply-chain worms run.
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - name: Edited tests are explained (Reason line)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            node scripts/check-assertions.js --range "$BASE..HEAD"
+          else
+            echo "No base commit to compare with (first push); skipped."
+          fi
+      - name: Gate files are not changed without the gates-change label
+        if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'gates-change')
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE...HEAD" -- eslint.config.js eslint.test-standard.js stryker.config.json .githooks .github gates scripts)
+          if [ -n "$changed" ]; then
+            echo "These files define the quality gates. Changing them needs the 'gates-change' label and a human review:"
+            echo "$changed"
+            exit 1
+          fi
+
+  e2e:
+    name: End-to-end (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci --ignore-scripts
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+  mutation:
+    name: Mutation testing (do the tests fail when the code is wrong?)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: npm ci --ignore-scripts
+      - run: npm run mutate

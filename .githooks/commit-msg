@@ -1,0 +1,6 @@
+#!/bin/sh
+# Checks the commit message: no client names, and a Reason: line when existing tests were edited
+# together with production code.
+set -e
+node scripts/check-client-names.js --msg "$1"
+node scripts/check-assertions.js --msg "$1"

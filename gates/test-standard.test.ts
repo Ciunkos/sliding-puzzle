@@ -518,3 +518,18 @@ describe('the worst real offenders from board.test.ts are reported', () => {
     assert.equal(found.length, 1);
   });
 });
+
+describe('expected values inside a fast-check property', () => {
+  const property = (assertion: string) =>
+    inTest(`fc.assert(fc.property(fc.integer(), (seed) => {\n  ${assertion}\n}));`);
+
+  test('may be computed, because a property compares two computed sides', async () => {
+    const code = property('assert.deepEqual(roundTrip(seed), boardFrom(seed));');
+    assert.equal((await hits(UNIT, code, 'test-standard/literal-expected')).length, 0);
+  });
+
+  test('must still be literal outside the property callback', async () => {
+    const code = inTest('assert.deepEqual(roundTrip(1), boardFrom(1));');
+    assert.equal((await hits(UNIT, code, 'test-standard/literal-expected')).length, 1);
+  });
+});

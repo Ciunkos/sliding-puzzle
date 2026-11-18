@@ -1,6 +1,7 @@
 // Every test sits next to the file it covers: src/x/foo.test.ts needs src/x/foo.ts or foo.tsx.
 // A test without a subject is either misplaced or tests something that no longer exists.
 import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { isEntrypoint, report } from './cli.js';
 
 const TEST = /\.test\.tsx?$/;
@@ -28,7 +29,8 @@ function main() {
     encoding: 'utf8',
   })
     .split('\n')
-    .filter(Boolean);
+    // ls-files still lists tracked files that were deleted in the working tree.
+    .filter((path) => path !== '' && existsSync(path));
   report('check-siblings', testsWithoutSubject(files), 'every test has its subject next to it');
 }
 

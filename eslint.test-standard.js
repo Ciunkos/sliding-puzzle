@@ -259,6 +259,15 @@ function expectCall(node) {
   return current?.type === 'CallExpression' && calleeNames(current.callee)[0] === 'expect';
 }
 
+/** True when one of the ancestors is a call to fc.property / fc.asyncProperty. */
+function insideProperty(ancestors) {
+  return ancestors.some((ancestor) => {
+    if (ancestor.type !== 'CallExpression') return false;
+    const [object, method] = calleeNames(ancestor.callee);
+    return object === 'fc' && (method === 'property' || method === 'asyncProperty');
+  });
+}
+
 /** @type {RuleModule} */
 const literalExpected = {
   meta: {
@@ -294,6 +303,8 @@ const literalExpected = {
         if (!isAssert && !isExpect) return;
         const expected = node.arguments[isAssert ? 1 : 0];
         if (!expected || isLiteralValue(expected)) return;
+        // A property compares two computed sides for every generated input: no literal is possible.
+        if (insideProperty(context.sourceCode.getAncestors(node))) return;
         context.report({ node: expected, messageId: mode, data: { method } });
       },
     };

@@ -1,7 +1,16 @@
 #!/bin/sh
-# Full gate before code leaves your machine.
-set -e
-echo "pre-push: npm test (lint, typecheck, unit, build)"
-npm test
+# Full gate before code leaves your machine. The verdict is the exit status, never filtered output.
+log=.git/pre-push.log
+echo "pre-push: npm run check (log: $log)"
+if ! npm run check > "$log" 2>&1; then
+  tail -40 "$log"
+  echo "pre-push: check FAILED (full log: $log)"
+  exit 1
+fi
 echo "pre-push: npm run test:e2e"
-npm run test:e2e
+if ! npm run test:e2e >> "$log" 2>&1; then
+  tail -40 "$log"
+  echo "pre-push: e2e FAILED (full log: $log)"
+  exit 1
+fi
+echo "pre-push: ok"

@@ -1,11 +1,13 @@
 #!/bin/sh
-# Fast checks on what you are committing. Bypassing with --no-verify is discouraged.
+# Fast checks on what you are committing. CI runs the full gate; do not bypass with --no-verify.
 set -e
 staged=$(git diff --cached --name-only --diff-filter=ACM)
 [ -z "$staged" ] && exit 0
-code=$(echo "$staged" | grep -E '\.(ts|tsx|js)$' || true)
+echo "pre-commit: client names"
+node scripts/check-client-names.js --staged
 echo "pre-commit: prettier"
-echo "$staged" | grep -E '\.(ts|tsx|js|json|md|html)$' | xargs -r npx prettier --check
+echo "$staged" | grep -E '\.(ts|tsx|js|json|md|html|css|yml)$' | xargs -r npx prettier --check
+code=$(echo "$staged" | grep -E '\.(ts|tsx|js)$' || true)
 if [ -n "$code" ]; then
   echo "pre-commit: eslint"
   echo "$code" | xargs npx eslint
