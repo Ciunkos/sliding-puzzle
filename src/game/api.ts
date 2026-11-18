@@ -61,11 +61,13 @@ function sendJson(method: 'PUT' | 'POST', body: unknown): RequestInit {
 
 export function createGameApi<State, Move, Options>(
   definition: GameDefinition<State, Move, Options>,
+  /** Where the API is mounted, e.g. /sliding-puzzle/api; injected by the web composition root. */
+  apiBase: string,
   fetchImpl: typeof fetch = fetch,
 ): GameApi<State, Move, Options> {
   const schema = savedGameSchema(definition.stateSchema);
   const base = (nickname: string) =>
-    `/api/profiles/${encodeURIComponent(nickname)}/games/${encodeURIComponent(definition.id)}`;
+    `${apiBase}/profiles/${encodeURIComponent(nickname)}/games/${encodeURIComponent(definition.id)}`;
 
   async function send(url: string, init: RequestInit): Promise<SavedGame<State>> {
     let res: Response;

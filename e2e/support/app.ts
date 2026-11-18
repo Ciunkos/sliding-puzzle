@@ -2,8 +2,8 @@
 import type { APIRequestContext, Page } from '@playwright/test';
 import { expect } from './harness.ts';
 
-/** The isolated API started by playwright.config.ts with ENABLE_TEST_ROUTES=1. */
-const API_BASE = 'http://localhost:8788';
+/** The isolated API started by playwright.config.ts with ENABLE_TEST_ROUTES=1, under the app's prefix. */
+const API_BASE = 'http://localhost:8788/sliding-puzzle/api';
 
 export const board = (page: Page) => page.getByTestId('board');
 export const moves = (page: Page) => page.getByTestId('moves');
@@ -13,7 +13,7 @@ export const solvedBanner = (page: Page) => page.getByTestId('solved-banner');
 
 /** Opens the picker and submits a nickname, without waiting for the outcome. */
 export async function submitNickname(page: Page, nickname: string): Promise<void> {
-  await page.goto('/');
+  await page.goto('/sliding-puzzle');
   await page.getByTestId('nickname-input').fill(nickname);
   await page.getByTestId('profile-submit').click();
 }
@@ -34,7 +34,7 @@ export async function startKnownGame(
   nickname: string,
 ): Promise<void> {
   await signIn(page, nickname);
-  const seeded = await request.post(`${API_BASE}/api/test/profiles/${nickname}/game/near-solved`);
+  const seeded = await request.post(`${API_BASE}/test/profiles/${nickname}/game/near-solved`);
   expect(seeded).toBeOK();
   await signIn(page, nickname);
 }

@@ -6,7 +6,9 @@ import { ProfilePicker } from './client.tsx';
 describe('ProfilePicker', () => {
   test('the picker renders a labelled nickname input and a submit button', () => {
     // When the picker is rendered
-    const html = renderToStaticMarkup(<ProfilePicker onSelected={() => undefined} />);
+    const html = renderToStaticMarkup(
+      <ProfilePicker apiBase="/sliding-puzzle/api" onSelected={() => undefined} />,
+    );
 
     // Then the label points at the input, and the test ids e2e relies on are present
     assert.match(html, /<label for="([^"]+)">Nickname<\/label><input id="\1"/);

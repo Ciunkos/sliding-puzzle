@@ -1,11 +1,9 @@
 // Client entry: the profile picker. Logic lives in api.ts, last-profile.ts, form.ts and
 // use-profile-form.ts; this stays presentational.
-import { type ReactElement, useId } from 'react';
+import { type ReactElement, useId, useMemo } from 'react';
 import { createProfileApi } from './api.ts';
 import type { Profile } from './index.ts';
 import { type ProfileForm, useProfileForm } from './use-profile-form.ts';
-
-const api = createProfileApi();
 
 const styles = {
   form: { display: 'flex', flexDirection: 'column', gap: '0.5rem', maxWidth: '20rem' },
@@ -36,7 +34,12 @@ function NicknameField({ form }: { form: ProfileForm }): ReactElement {
   );
 }
 
-export function ProfilePicker(props: { onSelected: (profile: Profile) => void }): ReactElement {
+export function ProfilePicker(props: {
+  /** Where the API is mounted, e.g. /sliding-puzzle/api. */
+  apiBase: string;
+  onSelected: (profile: Profile) => void;
+}): ReactElement {
+  const api = useMemo(() => createProfileApi(props.apiBase), [props.apiBase]);
   const form = useProfileForm(api, props.onSelected);
   return (
     <section>

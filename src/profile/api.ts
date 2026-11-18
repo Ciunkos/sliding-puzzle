@@ -22,14 +22,18 @@ async function readJson(res: Response): Promise<unknown> {
   }
 }
 
-export function createProfileApi(fetchImpl: typeof fetch = fetch): {
+/** `apiBase` is where the API is mounted, e.g. /sliding-puzzle/api; injected by the web composition root. */
+export function createProfileApi(
+  apiBase: string,
+  fetchImpl: typeof fetch = fetch,
+): {
   selectOrCreate(nickname: string): Promise<Profile>;
 } {
   return {
     async selectOrCreate(nickname: string): Promise<Profile> {
       let res: Response;
       try {
-        res = await fetchImpl('/api/profiles', {
+        res = await fetchImpl(`${apiBase}/profiles`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ nickname }),

@@ -10,5 +10,6 @@ export { useGameSession, type GameSession } from './use-game-session.ts';
 export interface ClientFeature {
   id: string;
   title: string;
-  Screen: (props: { nickname: string }) => ReactElement;
+  /** `apiBase` is where the API is mounted, e.g. /sliding-puzzle/api. */
+  Screen: (props: { nickname: string; apiBase: string }) => ReactElement;
 }

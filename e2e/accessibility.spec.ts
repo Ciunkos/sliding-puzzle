@@ -3,7 +3,7 @@ import { expect, expectAccessible, test, uniqueNickname } from './support/harnes
 
 test('the picker and the game have no accessibility violations', async ({ page, request }) => {
   await test.step('the profile picker', async () => {
-    await page.goto('/');
+    await page.goto('/sliding-puzzle');
     await expect(page.getByTestId('nickname-input')).toBeVisible();
     await expectAccessible(page);
   });

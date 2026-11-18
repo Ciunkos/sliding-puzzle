@@ -16,12 +16,12 @@ const SAVED = {
 
 /** An API client whose every request is answered with `reply`. */
 function answering(reply: () => Response) {
-  return createGameApi(tallyGame, () => Promise.resolve(reply()));
+  return createGameApi(tallyGame, '/sliding-puzzle/api', () => Promise.resolve(reply()));
 }
 
 /** An API client that pushes the url and init of every request to `sent` and answers SAVED. */
 function recording(sent: unknown[]) {
-  return createGameApi(tallyGame, (url, init) => {
+  return createGameApi(tallyGame, '/sliding-puzzle/api', (url, init) => {
     sent.push(url, init);
     return Promise.resolve(Response.json(SAVED));
   });
@@ -39,9 +39,9 @@ describe('the game API client', () => {
 
     // Then the nickname is encoded, each body is the options, and the answer is the game
     assert.deepEqual(sent, [
-      '/api/profiles/Ana%20Lu/games/tally',
+      '/sliding-puzzle/api/profiles/Ana%20Lu/games/tally',
       { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"target":5}' },
-      '/api/profiles/Ana%20Lu/games/tally',
+      '/sliding-puzzle/api/profiles/Ana%20Lu/games/tally',
       { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"target":7}' },
     ]);
     assert.deepEqual(resumed, SAVED);
@@ -58,13 +58,13 @@ describe('the game API client', () => {
 
     // Then each body carries its base version
     assert.deepEqual(sent, [
-      '/api/profiles/Ada/games/tally/move',
+      '/sliding-puzzle/api/profiles/Ada/games/tally/move',
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: '{"baseVersion":2,"move":{"add":2}}',
       },
-      '/api/profiles/Ada/games/tally/reset',
+      '/sliding-puzzle/api/profiles/Ada/games/tally/reset',
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -103,7 +103,9 @@ describe('the game API client', () => {
   });
 
   test('a network failure becomes a GameApiError with status 0', async () => {
-    const api = createGameApi(tallyGame, () => Promise.reject(new TypeError('fetch failed')));
+    const api = createGameApi(tallyGame, '/sliding-puzzle/api', () =>
+      Promise.reject(new TypeError('fetch failed')),
+    );
 
     await assert.rejects(api.start('Ada', { target: 5 }), {
       name: 'GameApiError',

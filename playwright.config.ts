@@ -17,12 +17,12 @@ export default defineConfig({
   webServer: [
     {
       command: `rm -f .e2e/e2e.db* && PORT=${String(API_PORT)} DB_PATH=.e2e/e2e.db ENABLE_TEST_ROUTES=1 node src/server/node.ts`,
-      url: `http://localhost:${String(API_PORT)}/api/health`,
+      url: `http://localhost:${String(API_PORT)}/sliding-puzzle/api/health`,
       reuseExistingServer: false,
     },
     {
       command: `API_URL=http://localhost:${String(API_PORT)} npx vite --port ${String(WEB_PORT)} --strictPort`,
-      url: `http://localhost:${String(WEB_PORT)}`,
+      url: `http://localhost:${String(WEB_PORT)}/sliding-puzzle`,
       reuseExistingServer: false,
     },
   ],

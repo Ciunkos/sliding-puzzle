@@ -26,15 +26,15 @@ describe('createProfileApi', () => {
   test('selecting a nickname posts it as JSON to the profiles route', async () => {
     // Given a fetch that records what it was asked
     const requests: unknown[] = [];
-    const api = createProfileApi(recording(requests, json(ADA, 200)));
+    const api = createProfileApi('/sliding-puzzle/api', recording(requests, json(ADA, 200)));
 
     // When Ada is selected
     await api.selectOrCreate('Ada');
 
-    // Then one JSON POST with the nickname went to /api/profiles
+    // Then one JSON POST with the nickname went to the profiles route under the api base
     assert.deepEqual(requests, [
       {
-        input: '/api/profiles',
+        input: '/sliding-puzzle/api/profiles',
         init: {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -45,13 +45,16 @@ describe('createProfileApi', () => {
   });
 
   test('a successful answer gives the parsed profile', async () => {
-    const api = createProfileApi(answering(json(ADA, 200)));
+    const api = createProfileApi('/sliding-puzzle/api', answering(json(ADA, 200)));
 
     assert.deepEqual(await api.selectOrCreate('Ada'), ADA);
   });
 
   test('a 400 answer carries the message the server sent', async () => {
-    const api = createProfileApi(answering(json({ error: 'nickname is taken' }, 400)));
+    const api = createProfileApi(
+      '/sliding-puzzle/api',
+      answering(json({ error: 'nickname is taken' }, 400)),
+    );
 
     await assert.rejects(api.selectOrCreate('Ada'), {
       name: 'ProfileApiError',
@@ -60,9 +63,17 @@ describe('createProfileApi', () => {
   });
 
   test('an unreachable server or an unusable answer gives the generic message', async () => {
-    const offline = createProfileApi(() => Promise.reject(new TypeError('fetch failed')));
-    const failing = createProfileApi(answering(json({ error: 'database is down' }, 500)));
-    const malformed = createProfileApi(answering(json({ id: 'seven' }, 200)));
+    const offline = createProfileApi('/sliding-puzzle/api', () =>
+      Promise.reject(new TypeError('fetch failed')),
+    );
+    const failing = createProfileApi(
+      '/sliding-puzzle/api',
+      answering(json({ error: 'database is down' }, 500)),
+    );
+    const malformed = createProfileApi(
+      '/sliding-puzzle/api',
+      answering(json({ id: 'seven' }, 200)),
+    );
 
     await assert.rejects(offline.selectOrCreate('Ada'), GENERIC_ERROR);
     await assert.rejects(failing.selectOrCreate('Ada'), GENERIC_ERROR);

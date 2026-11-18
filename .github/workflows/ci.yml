@@ -26,6 +26,8 @@ jobs:
       # No install scripts: they are how npm supply-chain worms run.
       - run: npm ci --ignore-scripts
       - run: npm run check
+      # The Worker bundle must build (no node: imports); needs no Cloudflare credentials.
+      - run: npm run worker:check
       - name: Edited tests are explained (Reason line)
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}

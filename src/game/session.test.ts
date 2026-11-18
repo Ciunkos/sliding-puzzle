@@ -18,7 +18,7 @@ const SAVED = {
 
 /** An API client whose requests get `replies` in order, one each. */
 function replying(...replies: Response[]) {
-  return createGameApi(tallyGame, () => {
+  return createGameApi(tallyGame, '/sliding-puzzle/api', () => {
     const reply = replies.shift();
     assert.ok(reply, 'the API client sent more requests than the test expected');
     return Promise.resolve(reply);

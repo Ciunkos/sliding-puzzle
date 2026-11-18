@@ -1,5 +1,5 @@
 // Client entry: the puzzle's client-side feature (its screen). Logic lives in plain .ts files.
-import type { ReactElement } from 'react';
+import { type ReactElement, useMemo } from 'react';
 import {
   type ClientFeature,
   createGameApi,
@@ -16,7 +16,6 @@ import {
 import * as styles from './styles.ts';
 import { solvedText, statusText } from './view-model.ts';
 
-const api = createGameApi(puzzleDefinition);
 /** A stable value: the session restarts when its options change. */
 const NEW_GAME: PuzzleOptions = {};
 
@@ -69,8 +68,10 @@ function Controls({ session }: { session: Session }): ReactElement {
   );
 }
 
-function PuzzleScreen({ nickname }: { nickname: string }): ReactElement {
-  const session = useGameSession(api, nickname, NEW_GAME);
+function PuzzleScreen(props: { nickname: string; apiBase: string }): ReactElement {
+  // Memoised: the session restarts when its api changes.
+  const api = useMemo(() => createGameApi(puzzleDefinition, props.apiBase), [props.apiBase]);
+  const session = useGameSession(api, props.nickname, NEW_GAME);
   return (
     <main style={styles.page}>
       <h1>Sliding puzzle</h1>

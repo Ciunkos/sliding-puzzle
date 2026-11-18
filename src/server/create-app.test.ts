@@ -8,8 +8,8 @@ import { features } from './features.ts';
 
 /** Enough hand-written random values for one puzzle shuffle; a shuffle needing more fails loudly. */
 const SHUFFLE_VALUES = repeated([0.1, 0.6, 0.35, 0.85], 250);
-const ADA_PUZZLE = '/api/profiles/Ada/games/sliding-puzzle';
-const NEAR_SOLVED = '/api/test/profiles/Ada/game/near-solved';
+const ADA_PUZZLE = '/sliding-puzzle/api/profiles/Ada/games/sliding-puzzle';
+const NEAR_SOLVED = '/sliding-puzzle/api/test/profiles/Ada/game/near-solved';
 
 type App = ReturnType<typeof createApp>;
 
@@ -22,7 +22,14 @@ function post(app: App, path: string, body: string): Promise<Response> {
 async function openApp(enableTestRoutes: boolean): Promise<App> {
   const db = await openTestDb();
   const random = scriptedRng(SHUFFLE_VALUES);
-  return createApp({ db, features, random, now: fixedNow, enableTestRoutes });
+  return createApp({
+    basePath: '/sliding-puzzle',
+    db,
+    features,
+    random,
+    now: fixedNow,
+    enableTestRoutes,
+  });
 }
 
 describe('createApp', () => {
@@ -31,7 +38,7 @@ describe('createApp', () => {
     const app = await openApp(false);
 
     // When Ada is created, starts the puzzle and reads it back
-    const created = await post(app, '/api/profiles', '{"nickname":"Ada"}');
+    const created = await post(app, '/sliding-puzzle/api/profiles', '{"nickname":"Ada"}');
     const started = await post(app, ADA_PUZZLE, '{}');
     const read = await app.request(ADA_PUZZLE);
 
@@ -48,7 +55,7 @@ describe('createApp', () => {
   test('an api path that no route answers is 404 not found', async () => {
     const app = await openApp(false);
 
-    const res = await app.request('/api/nothing-here');
+    const res = await app.request('/sliding-puzzle/api/nothing-here');
 
     assert.equal(res.status, 404);
     assert.deepEqual(await res.json(), { error: 'not found' });
@@ -56,10 +63,16 @@ describe('createApp', () => {
 
   test('an internal error is 500 without the error message', async () => {
     // Given an app over a database whose tables are missing
-    const app = createApp({ db: openEmptyDb(), features, random: scriptedRng([]), now: fixedNow });
+    const app = createApp({
+      basePath: '/sliding-puzzle',
+      db: openEmptyDb(),
+      features,
+      random: scriptedRng([]),
+      now: fixedNow,
+    });
 
     // When a request reaches the database
-    const res = await post(app, '/api/profiles', '{"nickname":"Ada"}');
+    const res = await post(app, '/sliding-puzzle/api/profiles', '{"nickname":"Ada"}');
 
     // Then the client sees only the generic error, not "no such table: profiles"
     assert.equal(res.status, 500);
@@ -68,7 +81,7 @@ describe('createApp', () => {
 
   test('the test routes are absent by default', async () => {
     const app = await openApp(false);
-    await post(app, '/api/profiles', '{"nickname":"Ada"}');
+    await post(app, '/sliding-puzzle/api/profiles', '{"nickname":"Ada"}');
 
     const res = await post(app, NEAR_SOLVED, '');
 
@@ -78,7 +91,7 @@ describe('createApp', () => {
 
   test('the test routes are present when enabled', async () => {
     const app = await openApp(true);
-    await post(app, '/api/profiles', '{"nickname":"Ada"}');
+    await post(app, '/sliding-puzzle/api/profiles', '{"nickname":"Ada"}');
 
     const res = await post(app, NEAR_SOLVED, '');
 
