@@ -176,4 +176,10 @@ export default defineConfig(
     files: ['src/server/node.ts', 'src/server/worker.ts', '*.config.{js,ts}'],
     rules: { 'no-console': 'off' },
   },
+  {
+    // Command-line check scripts report through the console.
+    files: ['scripts/**/*.js'],
+    languageOptions: { globals: { console: 'readonly' } },
+    rules: { 'no-console': 'off' },
+  },
 );
