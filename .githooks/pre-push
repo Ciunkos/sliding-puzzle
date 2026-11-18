@@ -1,6 +1,7 @@
 #!/bin/sh
 # Full gate before code leaves your machine. The verdict is the exit status, never filtered output.
-log=.git/pre-push.log
+# Ask git for the path: in a worktree .git is a file, not a directory.
+log=$(git rev-parse --git-path pre-push.log)
 echo "pre-push: npm run check (log: $log)"
 if ! npm run check > "$log" 2>&1; then
   tail -40 "$log"
