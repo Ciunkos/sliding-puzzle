@@ -23,7 +23,9 @@ function TileButton(props: {
       data-testid={'tile-' + String(cell.tile)}
       disabled={!cell.movable || busy}
       style={styles.tile(cell.movable)}
+      // Stryker disable next-line all: click wiring cannot run in server rendering; e2e/play.spec.ts covers it
       onClick={() => {
+        // Stryker disable next-line all: the same click handler as above
         onMove(cell.tile);
       }}
     >

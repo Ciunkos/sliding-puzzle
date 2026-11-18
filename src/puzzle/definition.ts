@@ -21,10 +21,11 @@ const stateSchema = z.object({
   board: z
     .array(z.number())
     .readonly()
-    .refine((board) => isValidBoard(board), 'invalid board'),
+    .refine((board) => isValidBoard(board)),
 });
 
-export const puzzleDefinition: GameDefinition<PuzzleState, PuzzleMove, PuzzleOptions> = {
+/** `satisfies` keeps isValidStart a required function in this type, so callers need no `?.`. */
+export const puzzleDefinition = {
   id: 'sliding-puzzle',
   stateSchema,
   moveSchema: z.object({ tile: z.number().int().min(1).max(15) }),
@@ -37,4 +38,4 @@ export const puzzleDefinition: GameDefinition<PuzzleState, PuzzleMove, PuzzleOpt
   isFinished: (state) => isSolved(state.board),
   isValidStart: (state) =>
     isValidBoard(state.board) && isSolvable(state.board) && !isSolved(state.board),
-};
+} satisfies GameDefinition<PuzzleState, PuzzleMove, PuzzleOptions>;

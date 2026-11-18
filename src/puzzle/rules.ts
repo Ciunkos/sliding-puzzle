@@ -8,15 +8,14 @@ const MAX_TILE = CELLS - 1;
 
 export const SOLVED_BOARD: Board = [...Array.from({ length: MAX_TILE }, (_, i) => i + 1), BLANK];
 
-function isTile(cell: unknown): cell is number {
-  return typeof cell === 'number' && Number.isInteger(cell) && cell >= 0 && cell <= MAX_TILE;
-}
+/** The cells a valid board holds: 0..MAX_TILE. `unknown` so any value can be looked up. */
+const CELL_VALUES: ReadonlySet<unknown> = new Set(SOLVED_BOARD);
 
-/** Exactly CELLS cells, each tile 0..MAX_TILE appearing once. */
+/** Exactly CELLS cells, each of 0..MAX_TILE appearing once. */
 export function isValidBoard(value: unknown): value is Board {
   if (!Array.isArray(value) || value.length !== CELLS) return false;
   const cells: unknown[] = value;
-  return cells.every(isTile) && new Set(cells).size === CELLS;
+  return cells.every((cell) => CELL_VALUES.has(cell)) && new Set(cells).size === CELLS;
 }
 
 export function isSolved(board: Board): boolean {
@@ -40,34 +39,33 @@ export function isSolvable(board: Board): boolean {
   return (inversions + blankRow) % 2 === 1;
 }
 
-/** Index of the blank's orthogonal neighbours, i.e. the cells a tile may slide from. */
+/**
+ * Index of the blank's orthogonal neighbours, i.e. the cells a tile may slide from.
+ * Up and down are not range-checked: an index above or below the board matches no cell
+ * (applyMove rejects a tile that is not found, index -1, before it looks here).
+ * Left and right are, or the end of one row would touch the start of the next.
+ */
 function neighboursOf(index: number): number[] {
-  const row = Math.floor(index / SIZE);
   const col = index % SIZE;
-  const result: number[] = [];
-  if (row > 0) result.push(index - SIZE);
-  if (row < SIZE - 1) result.push(index + SIZE);
+  const result = [index - SIZE, index + SIZE];
   if (col > 0) result.push(index - 1);
   if (col < SIZE - 1) result.push(index + 1);
   return result;
 }
 
 export function legalMoves(board: Board): number[] {
-  const blank = board.indexOf(BLANK);
-  const moves: number[] = [];
-  for (const index of neighboursOf(blank)) {
-    const tile = board[index];
-    if (tile !== undefined) moves.push(tile);
-  }
-  return moves.sort((a, b) => a - b);
+  const neighbours = neighboursOf(board.indexOf(BLANK));
+  return board.filter((_, index) => neighbours.includes(index)).sort((a, b) => a - b);
 }
 
+/**
+ * The board after `tile` slides into the blank, or undefined when it cannot: a number that is not
+ * on the board (16, 1.5, ...), the blank itself, a tile not next to the blank, or no blank at all.
+ */
 export function applyMove(board: Board, tile: number): Board | undefined {
-  if (!Number.isInteger(tile) || tile < 1 || tile > MAX_TILE) return undefined;
   const from = board.indexOf(tile);
   const blank = board.indexOf(BLANK);
-  if (from === -1 || blank === -1) return undefined;
-  if (!neighboursOf(blank).includes(from)) return undefined;
+  if (from === -1 || blank === -1 || !neighboursOf(blank).includes(from)) return undefined;
   const next = [...board];
   next[blank] = tile;
   next[from] = BLANK;

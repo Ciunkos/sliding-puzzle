@@ -10,12 +10,12 @@ export interface Cell {
 
 /** The cells in board order. A tile is movable when it can slide into the blank and the game is open. */
 export function toCells(game: SavedGame<PuzzleState>): Cell[] {
-  const movable = new Set(game.finished ? [] : legalMoves(game.state.board));
-  return game.state.board.map((tile) => ({ tile, movable: movable.has(tile) }));
+  const legal = new Set(legalMoves(game.state.board));
+  return game.state.board.map((tile) => ({ tile, movable: !game.finished && legal.has(tile) }));
 }
 
 export function solvedText(game: SavedGame<PuzzleState>): string {
-  return `Solved in ${String(game.moves)} moves!`;
+  return `Solved in ${String(game.moves)} ${game.moves === 1 ? 'move' : 'moves'}!`;
 }
 
 /** Always just the move count. The solved sentence lives in the banner (see solvedText). */
