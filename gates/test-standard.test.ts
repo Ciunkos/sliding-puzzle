@@ -533,3 +533,17 @@ describe('expected values inside a fast-check property', () => {
     assert.equal((await hits(UNIT, code, 'test-standard/literal-expected')).length, 1);
   });
 });
+
+describe('a shared contract in test-support', () => {
+  const CONTRACT = 'src/test-support/db.contract.ts';
+
+  test('is held to the test standard, so branching in it is reported', async () => {
+    const code = inTest('if (rows.length > 0) assert.equal(rows.length, 1);');
+    assert.equal((await hits(CONTRACT, code, SYNTAX, 'Remove the if')).length, 1);
+  });
+
+  test('is not held to the production function-length limit', async () => {
+    const code = inTest(ok);
+    assert.equal((await hits(CONTRACT, code, 'test-standard/max-lines-per-function')).length, 0);
+  });
+});

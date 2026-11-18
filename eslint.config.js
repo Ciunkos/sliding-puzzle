@@ -2,7 +2,7 @@
 import js from '@eslint/js';
 import { defineConfig } from 'eslint/config';
 import tseslint from 'typescript-eslint';
-import { productionLimits } from './eslint.test-standard.js';
+import { e2eStandard, productionLimits, testStandard } from './eslint.test-standard.js';
 
 /**
  * ARCHITECTURE RULES (modular monolith). See AGENTS.md.
@@ -143,6 +143,8 @@ export default defineConfig(
   pureConfig,
   noTestCodeInProduction,
   ...productionLimits,
+  ...testStandard,
+  ...e2eStandard,
   {
     // Composition root: server wires module server.ts entries; never client code or web.
     files: ['src/server/**/*.ts'],
@@ -169,7 +171,7 @@ export default defineConfig(
   },
   { files: ['**/*.js'], extends: [tseslint.configs.disableTypeChecked] },
   {
-    files: ['**/*.test.{ts,tsx}', 'e2e/**/*.ts'],
+    files: ['**/*.test.{ts,tsx}', 'src/test-support/**/*.contract.ts', 'e2e/**/*.ts'],
     rules: { 'no-console': 'off', '@typescript-eslint/no-floating-promises': 'off' },
   },
   {

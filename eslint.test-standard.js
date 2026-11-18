@@ -527,7 +527,8 @@ const LOCKED = { noInlineConfig: true, reportUnusedDisableDirectives: 'error' };
 export const testStandard = [
   {
     name: 'test-standard/unit',
-    files: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    // A *.contract.ts file in test-support defines tests shared by several test files.
+    files: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/test-support/**/*.contract.ts'],
     plugins: { 'test-standard': plugin },
     linterOptions: LOCKED,
     rules: {
@@ -556,7 +557,7 @@ export const productionLimits = [
   {
     name: 'test-standard/production-limits',
     files: ['src/**/*.ts', 'src/**/*.tsx'],
-    ignores: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
+    ignores: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/test-support/**/*.contract.ts'],
     plugins: { 'test-standard': plugin },
     linterOptions: { reportUnusedDisableDirectives: 'error' },
     settings: {
