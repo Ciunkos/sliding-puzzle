@@ -67,7 +67,7 @@ export interface GameService<State, Move, Options> {
   applyMoves(profileId: number, batch: MoveBatch<Move>): Promise<GameResult<State>>;
   /** Resets the game at `baseVersion` back to its initial state, starting its clock again. */
   reset(profileId: number, baseVersion: number): Promise<GameResult<State>>;
-  /** The profile's best results per variant: fewest moves, then shortest time; top 5 each. */
+  /** The profile's best results per variant, ordered by the definition's ranking; top 5 each. */
   results(profileId: number): Promise<BestResult[]>;
 }
 
@@ -115,12 +115,13 @@ function resultOf<State>(
   elapsedMs: number | undefined,
 ): ResultRow {
   const durationMs = Math.max(0, now.getTime() - Date.parse(game.startedAt));
-  return {
+  const result = {
     variant: definition.variant?.(game.state) ?? 'default',
     moves: game.moves,
     durationMs,
     reportedMs: elapsedMs === undefined ? null : Math.min(elapsedMs, durationMs),
   };
+  return definition.score ? { ...result, score: definition.score(game.state) } : result;
 }
 
 /** The step of a batch: apply every move, count them, and record when the last one finishes the game. */
@@ -279,6 +280,7 @@ export function createGameService<State, Move, Options>(
   options: GameServiceOptions,
 ): GameService<State, Move, Options> {
   const schema = savedGameSchema(definition.stateSchema);
+  const ranking = definition.ranking ?? 'fewest-moves';
   const engine: Engine<State, Move, Options> = { db, definition, schema, now: options.now };
   const movesStep = (batch: Omit<MoveBatch<Move>, 'baseVersion' | 'batchId'>) =>
     batchStep(definition, options.random, batch);
@@ -297,6 +299,6 @@ export function createGameService<State, Move, Options>(
       mutate(engine, profileId, { baseVersion, batchId, step: movesStep(batch) }),
     reset: (profileId, baseVersion) =>
       mutate(engine, profileId, { baseVersion, batchId: null, step: resetStep(definition) }),
-    results: (profileId) => bestResults(db, keyOf(engine, profileId), RESULTS_PER_VARIANT),
+    results: (profileId) => bestResults(db, keyOf(engine, profileId), RESULTS_PER_VARIANT, ranking),
   };
 }

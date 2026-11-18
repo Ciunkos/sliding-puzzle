@@ -28,7 +28,18 @@ export interface GameDefinition<State, Move, Options> {
   isValidStart?(state: State): boolean;
   /** Which kind of game `state` is, for grouping best results, e.g. '4x4'. Default: 'default'. */
   variant?(state: State): string;
+  /** An integer recorded with the result when a game finishes. Default: no score. */
+  score?(state: State): number;
+  /** How this game's best results are ordered. Default: 'fewest-moves'. */
+  ranking?: Ranking;
 }
+
+/**
+ * 'fewest-moves': fewest moves, then the shortest time, then the earliest finish.
+ * 'highest-score': highest score, then the shortest time, then the earliest finish. Needs `score`.
+ * The time is the reported active time when there is one, else the server-observed duration.
+ */
+export type Ranking = 'fewest-moves' | 'highest-score';
 
 export interface SavedGame<State> {
   state: State;
@@ -68,6 +79,8 @@ export const bestResultSchema = z.object({
   moves: z.number().int().min(0),
   durationMs: z.number().int().min(0),
   reportedMs: z.number().int().min(0).nullable(),
+  /** Present only for a game whose definition has a score. */
+  score: z.number().int().optional(),
   finishedAt: z.string(),
 });
 

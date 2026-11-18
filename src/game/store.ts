@@ -1,7 +1,7 @@
 // The games table over the Db port. Rows are never trusted: every read is validated.
 import { z } from 'zod';
 import type { Db } from '../db/index.ts';
-import type { BestResult, SavedGame } from './index.ts';
+import type { BestResult, Ranking, SavedGame } from './index.ts';
 
 /** Which saved game: one per profile per game id. */
 export interface GameKey {
@@ -127,7 +127,7 @@ export async function insertIfAbsent(db: Db, key: GameKey, game: FreshGame): Pro
   return changes > 0;
 }
 
-/** The result row a finishing move writes (see migrations/0005_results.sql). */
+/** The result row a finishing move writes (see migrations/0005_results.sql and 0006). */
 export type ResultRow = Omit<BestResult, 'finishedAt'>;
 
 /** What a compare-and-swap writes: the next game, the batch that made it, and its result if it finished. */
@@ -170,8 +170,8 @@ function updateStatement(key: GameKey, swap: Swap) {
 function resultStatement(key: GameKey, swap: Swap, result: ResultRow) {
   return {
     sql: `INSERT OR IGNORE INTO results
-         (profile_id, game_id, version, variant, moves, duration_ms, reported_ms, finished_at)
-       SELECT profile_id, game_id, ?, ?, ?, ?, ?, ?
+         (profile_id, game_id, version, variant, moves, duration_ms, reported_ms, score, finished_at)
+       SELECT profile_id, game_id, ?, ?, ?, ?, ?, ?, ?
          FROM games WHERE profile_id = ? AND game_id = ? AND version = ?`,
     params: [
       swap.next.version,
@@ -179,6 +179,7 @@ function resultStatement(key: GameKey, swap: Swap, result: ResultRow) {
       result.moves,
       result.durationMs,
       result.reportedMs,
+      result.score ?? null,
       swap.next.finishedAt,
       key.profileId,
       key.gameId,
@@ -206,30 +207,47 @@ const resultRows = z.array(
     moves: z.number().int(),
     duration_ms: z.number().int(),
     reported_ms: z.number().int().nullable(),
+    score: z.number().int().nullable(),
     finished_at: z.string(),
   }),
 );
 
-/**
- * The best `limit` results of each variant: fewest moves, then the shortest time (the reported
- * active time when there is one, else the server-observed duration), then the earliest.
- */
-export async function bestResults(db: Db, key: GameKey, limit: number): Promise<BestResult[]> {
-  const rows = await db.all(
-    `SELECT variant, moves, duration_ms, reported_ms, finished_at FROM (
-       SELECT *, ROW_NUMBER() OVER (
-           PARTITION BY variant
-           ORDER BY moves, COALESCE(reported_ms, duration_ms), finished_at, version
-         ) AS place
-         FROM results WHERE profile_id = ? AND game_id = ?
-     ) WHERE place <= ? ORDER BY variant, place`,
-    [key.profileId, key.gameId, limit],
-  );
-  return resultRows.parse(rows).map((row) => ({
+/** The ORDER BY of each ranking. Fixed text only: nothing from a request ever reaches the SQL. */
+const RANKING_ORDER: Record<Ranking, string> = {
+  'fewest-moves': 'moves, COALESCE(reported_ms, duration_ms), finished_at, version',
+  'highest-score': 'score DESC, COALESCE(reported_ms, duration_ms), finished_at, version',
+};
+
+type ResultRecord = z.infer<typeof resultRows>[number];
+
+/** A stored row as a best result; a NULL score (a game that does not score) is left out. */
+function toBestResult(row: ResultRecord): BestResult {
+  const result = {
     variant: row.variant,
     moves: row.moves,
     durationMs: row.duration_ms,
     reportedMs: row.reported_ms,
     finishedAt: row.finished_at,
-  }));
+  };
+  return row.score === null ? result : { ...result, score: row.score };
+}
+
+/** The best `limit` results of each variant, in the order of `ranking` (see Ranking). */
+export async function bestResults(
+  db: Db,
+  key: GameKey,
+  limit: number,
+  ranking: Ranking,
+): Promise<BestResult[]> {
+  const rows = await db.all(
+    `SELECT variant, moves, duration_ms, reported_ms, score, finished_at FROM (
+       SELECT *, ROW_NUMBER() OVER (
+           PARTITION BY variant
+           ORDER BY ${RANKING_ORDER[ranking]}
+         ) AS place
+         FROM results WHERE profile_id = ? AND game_id = ?
+     ) WHERE place <= ? ORDER BY variant, place`,
+    [key.profileId, key.gameId, limit],
+  );
+  return resultRows.parse(rows).map(toBestResult);
 }

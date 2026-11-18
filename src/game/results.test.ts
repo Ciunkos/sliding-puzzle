@@ -52,3 +52,32 @@ describe('isNewPersonalBest', () => {
     assert.equal(isNewPersonalBest([OWN], undefined), false);
   });
 });
+
+// The engine lists each variant best first under the game's ranking; isNewPersonalBest follows that
+// order whatever the ranking. These lists are ranked by highest score, then the shortest time.
+const SCORED_OWN = { ...OWN, moves: 9, score: 30 };
+const EARLIER_FEWER_MOVES_LOWER_SCORE = { ...EARLIER_BETTER, moves: 2, score: 10 };
+const EARLIER_SAME_SCORE_AND_TIME = { ...EARLIER_BETTER, moves: 9, score: 30 };
+const FINISHED_IN_NINE = { ...FINISHED, moves: 9 };
+
+describe('isNewPersonalBest for a game ranked by score', () => {
+  test('a higher score leads its variant even with more moves, and is a new best', () => {
+    const results = [SCORED_OWN, EARLIER_FEWER_MOVES_LOWER_SCORE];
+
+    assert.equal(isNewPersonalBest(results, FINISHED_IN_NINE), true);
+  });
+
+  test('an equal score and time reached earlier keeps the lead: not a new best', () => {
+    const results = [EARLIER_SAME_SCORE_AND_TIME, SCORED_OWN];
+
+    assert.equal(isNewPersonalBest(results, FINISHED_IN_NINE), false);
+  });
+});
+
+describe('isNewPersonalBest for a game ranked by fewest moves', () => {
+  test('an equal result reached earlier keeps the lead: not a new best', () => {
+    const results = [{ ...OWN, finishedAt: '2025-12-31T00:00:00.000Z' }, OWN];
+
+    assert.equal(isNewPersonalBest(results, FINISHED), false);
+  });
+});

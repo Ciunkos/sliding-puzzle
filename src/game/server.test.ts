@@ -53,4 +53,16 @@ describe('featureRoutes', () => {
     // When its routes are built, then building fails and names the id
     assert.throws(() => featureRoutes(feature, shared), /"tally:x"/);
   });
+
+  test('a game ranked by highest score without a score function is refused', async () => {
+    // Given a game that asks to be ranked by score but cannot score
+    const feature = { definition: { ...tallyGame, ranking: 'highest-score' as const } };
+    const shared = await context(false);
+
+    // When its routes are built, then building fails and says what is missing
+    assert.throws(
+      () => featureRoutes(feature, shared),
+      /game "tally" is ranked by highest score but has no score function/,
+    );
+  });
 });

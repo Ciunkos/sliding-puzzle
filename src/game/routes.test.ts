@@ -4,7 +4,9 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { fixedNow, openTestDb } from '../test-support/db.ts';
+import { featureApp } from '../test-support/feature-app.ts';
 import { createTestProfile, testProfiles } from '../test-support/profiles.ts';
+import { scoreGame } from '../test-support/score-game.ts';
 import { ALWAYS_LOW, tallyGame } from '../test-support/tally-game.ts';
 import { featureRoutes } from './server.ts';
 
@@ -33,6 +35,20 @@ async function setup() {
 }
 
 type App = Awaited<ReturnType<typeof setup>>;
+
+const ADA_SCORE_GAME = '/api/profiles/Ada/games/score';
+const FINISH_SCORE_GAME_WITH_9 =
+  '{"baseVersion":1,"batchId":"batch-one","moves":[{"gain":2},{"gain":3},{"gain":4}]}';
+
+/** The score game's routes, where Ada finished a game with 2 + 3 + 4 points. */
+async function finishedScoreGame(): Promise<App> {
+  const db = await openTestDb();
+  await createTestProfile(db, 'Ada');
+  const app = featureApp({ definition: scoreGame }, db, { enableTestRoutes: false });
+  await post(app, ADA_SCORE_GAME, '{}');
+  await post(app, `${ADA_SCORE_GAME}/moves`, FINISH_SCORE_GAME_WITH_9);
+  return app;
+}
 
 async function post(app: App, path: string, body: string): Promise<Response> {
   return app.request(path, { method: 'POST', body });
@@ -318,6 +334,26 @@ describe('the game routes', () => {
         moves: 1,
         durationMs: 0,
         reportedMs: 0,
+        finishedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  test('the results of a game with a score carry the score', async () => {
+    // Given Ada's score game finished with 9 points
+    const app = await finishedScoreGame();
+
+    // When the results are read
+    const res = await app.request(`${ADA_SCORE_GAME}/results`);
+
+    // Then the result has its score
+    assert.deepEqual(await res.json(), [
+      {
+        variant: 'default',
+        moves: 3,
+        durationMs: 0,
+        reportedMs: null,
+        score: 9,
         finishedAt: '2026-01-01T00:00:00.000Z',
       },
     ]);

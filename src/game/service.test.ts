@@ -4,6 +4,7 @@ import fc, { type AsyncCommand } from 'fast-check';
 import { fixedNow, openTestDb } from '../test-support/db.ts';
 import { interleavingDb } from '../test-support/interleaving-db.ts';
 import { createTestProfile } from '../test-support/profiles.ts';
+import { playScoreGames, scoreGame } from '../test-support/score-game.ts';
 import {
   ALWAYS_HIGH,
   ALWAYS_LOW,
@@ -415,7 +416,7 @@ async function startedAtMidnight(target: number) {
   const { db, service, id } = await setup();
   await service.start(id, { target });
   const later = createGameService(db, tallyGame, FIVE_MINUTES_LATER);
-  return { service, later, id };
+  return { db, service, later, id };
 }
 
 describe('a batch of moves', () => {
@@ -708,6 +709,95 @@ describe('the best results', () => {
     assert.deepEqual(await later.results(id), [
       { variant: 'to 3', moves: 1, durationMs: 300_000, reportedMs: 1000, finishedAt: AT_FIVE },
     ]);
+  });
+
+  test('a game whose definition has no score stores a null score', async () => {
+    const { db, later, id } = await startedAtMidnight(3);
+
+    await move(later, id, 3, 1);
+
+    assert.deepEqual(await db.all('SELECT score FROM results'), [{ score: null }]);
+  });
+});
+
+/** The four score games of the ranking test, as they must be listed. */
+const HIGHEST_SCORE_FIRST = [
+  {
+    variant: 'default',
+    moves: 3,
+    durationMs: 300_000,
+    reportedMs: 60_000,
+    score: 15,
+    finishedAt: AT_FIVE,
+  },
+  {
+    variant: 'default',
+    moves: 3,
+    durationMs: 300_000,
+    reportedMs: 90_000,
+    score: 15,
+    finishedAt: AT_FIVE,
+  },
+  {
+    variant: 'default',
+    moves: 3,
+    durationMs: 300_000,
+    reportedMs: 20_000,
+    score: 6,
+    finishedAt: AT_FIVE,
+  },
+  {
+    variant: 'default',
+    moves: 3,
+    durationMs: 300_000,
+    reportedMs: 10_000,
+    score: 3,
+    finishedAt: AT_FIVE,
+  },
+];
+
+/** Ada with the score game: a service at midnight and one five minutes later. */
+async function scoreServices() {
+  const db = await openTestDb();
+  const ada = await createTestProfile(db, 'Ada');
+  const starter = createGameService(db, scoreGame, AT_MIDNIGHT);
+  const finisher = createGameService(db, scoreGame, FIVE_MINUTES_LATER);
+  return { starter, finisher, id: ada.id };
+}
+
+describe('the best results of a game ranked by score', () => {
+  test('a finished score game stores its score with its result', async () => {
+    const { starter, finisher, id } = await scoreServices();
+
+    await playScoreGames(starter, finisher, id, [{ gains: [4, 0, 8] }]);
+
+    assert.deepEqual(await finisher.results(id), [
+      {
+        variant: 'default',
+        moves: 3,
+        durationMs: 300_000,
+        reportedMs: null,
+        score: 12,
+        finishedAt: AT_FIVE,
+      },
+    ]);
+  });
+
+  test('results are listed highest score first, then the shortest time', async () => {
+    // Given games scoring 3, 15 in 90 s, 6, and 15 in 60 s
+    const { starter, finisher, id } = await scoreServices();
+    await playScoreGames(starter, finisher, id, [
+      { gains: [1, 1, 1], elapsedMs: 10_000 },
+      { gains: [5, 5, 5], elapsedMs: 90_000 },
+      { gains: [2, 2, 2], elapsedMs: 20_000 },
+      { gains: [5, 5, 5], elapsedMs: 60_000 },
+    ]);
+
+    // When the results are listed
+    const results = await finisher.results(id);
+
+    // Then the highest score leads, the faster of two equal scores first
+    assert.deepEqual(results, HIGHEST_SCORE_FIRST);
   });
 });
 

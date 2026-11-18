@@ -181,6 +181,29 @@ describe('the game API client', () => {
     );
   });
 
+  test('a result with a score is parsed with its score', async () => {
+    const api = answering(() => Response.json([{ ...RESULT, score: 42 }]));
+
+    const results = await api.results('Ada');
+
+    assert.deepEqual(results, [
+      {
+        variant: 'to 5',
+        moves: 5,
+        durationMs: 9000,
+        reportedMs: 8000,
+        score: 42,
+        finishedAt: '2026-01-01T00:00:09.000Z',
+      },
+    ]);
+  });
+
+  test('a result whose score is not an integer is rejected', async () => {
+    const api = answering(() => Response.json([{ ...RESULT, score: 4.5 }]));
+
+    await assert.rejects(api.results('Ada'), { message: 'Unexpected response from the server' });
+  });
+
   test('results that are not results are rejected', async () => {
     const api = answering(() => Response.json([{ variant: 'to 5' }]));
 

@@ -37,6 +37,11 @@ export function featureRoutes<State, Move, Options>(
   if (!GAME_ID.test(definition.id)) {
     throw new Error(`game id "${definition.id}" must be lowercase letters, digits and dashes`);
   }
+  if (definition.ranking === 'highest-score' && definition.score === undefined) {
+    throw new Error(
+      `game "${definition.id}" is ranked by highest score but has no score function: add score(state)`,
+    );
+  }
   const service = createGameService(context.db, definition, context);
   const app = new Hono();
   app.route('/', gameRoutes(definition, service, context.profiles));
