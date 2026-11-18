@@ -33,7 +33,8 @@ test('the 3D board is drawn under the buttons and shows the board after a tap', 
 }) => {
   await startKnownGame(page, request, uniqueNickname());
   await test.step('the scene draws its first frame, and the buttons hand their looks over', async () => {
-    await expect(scene(page)).toHaveAttribute('data-webgl', 'ready');
+    // The 3D chunk loads after first paint; on a machine without a GPU that takes a while.
+    await expect(scene(page)).toHaveAttribute('data-webgl', 'ready', { timeout: 30_000 });
     await expect(scene(page).locator('canvas')).toHaveCount(1);
     await expect(board(page)).toHaveClass(/sp-layered/);
   });

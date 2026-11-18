@@ -121,6 +121,9 @@ export default defineConfig({
   root: 'src/web',
   base: '/sliding-puzzle/',
   plugins: [react(), workersAssets(), serviceWorker(), sameRoutesInDev()],
+  // Prepare three.js when the dev server starts. Otherwise Vite bundles it on first use and
+  // reloads the page, which lands in the middle of whatever a player or a test was doing.
+  optimizeDeps: { include: ['three'] },
   server: {
     proxy: { '/sliding-puzzle/api': process.env.API_URL ?? 'http://localhost:8787' },
   },
