@@ -6,6 +6,7 @@ import { gameRoutes, type ProfileLookup } from './routes.ts';
 import { createGameService, type GameService } from './service.ts';
 
 export * from './index.ts';
+export type { BatchResult, GameService, MoveBatch } from './service.ts';
 /** What a game feature hands to the server composition root. */
 export interface ServerFeature<State = unknown, Move = unknown, Options = unknown> {
   definition: GameDefinition<State, Move, Options>;

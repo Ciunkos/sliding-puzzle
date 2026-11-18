@@ -12,7 +12,9 @@ export {
   isSolved,
   isValidBoard,
   legalMoves,
-  SIZE,
-  SOLVED_BOARD,
+  type Size,
+  SIZES,
+  sizeOf,
+  solvedBoard,
 } from './rules.ts';
 export { shuffle } from './shuffle.ts';

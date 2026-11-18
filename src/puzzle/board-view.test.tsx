@@ -6,68 +6,115 @@ import { grid } from '../test-support/grid.ts';
 import type { PuzzleState } from './index.ts';
 import { BoardView } from './board-view.tsx';
 
-/** One move (tile 12) away from solved: tiles 8, 11 and 12 can slide into the blank. */
-const TWELVE_DOWN = grid`
-   1  2  3  4
-   5  6  7  8
-   9 10 11  _
-  13 14 15 12
+/** A 3x3 board with the blank in the middle: tiles 2, 4, 6 and 8 can slide into it. */
+const BLANK_IN_THE_MIDDLE = grid`
+  3 2 1
+  4 _ 6
+  7 8 5
+`;
+/** One move (tile 24) away from solved: tiles 19, 23 and 24 can slide into the blank. */
+const TWENTY_FOUR_RIGHT = grid`
+   1  2  3  4  5
+   6  7  8  9 10
+  11 12 13 14 15
+  16 17 18 19 20
+  21 22 23  _ 24
 `;
 
-const GAME: SavedGame<PuzzleState> = {
-  state: { board: TWELVE_DOWN },
-  initial: { board: TWELVE_DOWN },
-  moves: 1,
-  finished: false,
-  version: 2,
-  startedAt: '2026-01-01T00:00:00.000Z',
-  finishedAt: null,
-};
-
-/** Static HTML without inline styles, one element per line. */
-function markup(busy: boolean): string {
-  const html = renderToStaticMarkup(<BoardView game={GAME} busy={busy} onMove={() => undefined} />);
-  return html.replaceAll(/ style="[^"]*"/g, '').replaceAll('><', '>\n<');
+function savedGame(board: readonly number[], finished: boolean): SavedGame<PuzzleState> {
+  return {
+    state: { board },
+    initial: { board },
+    moves: 1,
+    finished,
+    version: 2,
+    startedAt: '2026-01-01T00:00:00.000Z',
+    finishedAt: null,
+  };
 }
 
-const CELLS_OF_OPEN_GAME = `<button type="button" data-testid="tile-1" disabled="">1</button>
-<button type="button" data-testid="tile-2" disabled="">2</button>
-<button type="button" data-testid="tile-3" disabled="">3</button>
-<button type="button" data-testid="tile-4" disabled="">4</button>
-<button type="button" data-testid="tile-5" disabled="">5</button>
-<button type="button" data-testid="tile-6" disabled="">6</button>
-<button type="button" data-testid="tile-7" disabled="">7</button>
-<button type="button" data-testid="tile-8">8</button>
-<button type="button" data-testid="tile-9" disabled="">9</button>
-<button type="button" data-testid="tile-10" disabled="">10</button>
-<button type="button" data-testid="tile-11">11</button>
-<div data-testid="tile-blank">
+/** Static HTML, one element per line. */
+function markup(game: SavedGame<PuzzleState>): string {
+  return renderToStaticMarkup(<BoardView game={game} onMove={() => undefined} />).replaceAll(
+    '><',
+    '>\n<',
+  );
+}
+
+const THIRD = 'width:calc(100% / 3);height:calc(100% / 3)';
+const CELLS_OF_THE_3X3_GAME = `<div data-testid="tile-blank" class="sp-blank" style="${THIRD};transform:translate(100%, 100%)">
 </div>
-<button type="button" data-testid="tile-13" disabled="">13</button>
-<button type="button" data-testid="tile-14" disabled="">14</button>
-<button type="button" data-testid="tile-15" disabled="">15</button>
-<button type="button" data-testid="tile-12">12</button>
+<button type="button" class="sp-tile" data-testid="tile-1" data-tile="1" aria-label="Tile 1" aria-disabled="true" style="${THIRD};transform:translate(200%, 0%)">
+<span class="sp-face">1</span>
+</button>
+<button type="button" class="sp-tile" data-testid="tile-2" data-tile="2" aria-label="Tile 2" aria-disabled="false" style="${THIRD};transform:translate(100%, 0%)">
+<span class="sp-face">2</span>
+</button>
+<button type="button" class="sp-tile" data-testid="tile-3" data-tile="3" aria-label="Tile 3" aria-disabled="true" style="${THIRD};transform:translate(0%, 0%)">
+<span class="sp-face">3</span>
+</button>
+<button type="button" class="sp-tile" data-testid="tile-4" data-tile="4" aria-label="Tile 4" aria-disabled="false" style="${THIRD};transform:translate(0%, 100%)">
+<span class="sp-face">4</span>
+</button>
+<button type="button" class="sp-tile" data-testid="tile-5" data-tile="5" aria-label="Tile 5" aria-disabled="true" style="${THIRD};transform:translate(200%, 200%)">
+<span class="sp-face">5</span>
+</button>
+<button type="button" class="sp-tile" data-testid="tile-6" data-tile="6" aria-label="Tile 6" aria-disabled="false" style="${THIRD};transform:translate(200%, 100%)">
+<span class="sp-face">6</span>
+</button>
+<button type="button" class="sp-tile" data-testid="tile-7" data-tile="7" aria-label="Tile 7" aria-disabled="true" style="${THIRD};transform:translate(0%, 200%)">
+<span class="sp-face">7</span>
+</button>
+<button type="button" class="sp-tile" data-testid="tile-8" data-tile="8" aria-label="Tile 8" aria-disabled="false" style="${THIRD};transform:translate(100%, 200%)">
+<span class="sp-face">8</span>
+</button>
 </div>`;
 
 describe('BoardView', () => {
   test('the board is a group named "Sliding puzzle" that carries its cells in data-board', () => {
-    const html = markup(false);
+    const html = markup(savedGame(BLANK_IN_THE_MIDDLE, false));
 
     assert.match(html, /^<div data-testid="board" role="group" aria-label="Sliding puzzle" /);
-    assert.match(html, / data-board="1,2,3,4,5,6,7,8,9,10,11,0,13,14,15,12">\n/);
+    assert.match(html, / data-board="3,2,1,4,0,6,7,8,5" class="sp-board sp-size-3">\n/);
   });
 
-  test('each tile is a button labelled with its number, enabled only next to the blank', () => {
+  test('a 3x3 game has one button per tile in number order, placed in its cell, movable or aria-disabled', () => {
     // Given the markup after its first line, the board's own <div>
-    const cells = markup(false).split('\n').slice(1).join('\n');
+    const cells = markup(savedGame(BLANK_IN_THE_MIDDLE, false)).split('\n').slice(1).join('\n');
 
-    assert.equal(cells, CELLS_OF_OPEN_GAME);
+    assert.equal(cells, CELLS_OF_THE_3X3_GAME);
   });
 
-  test('while a move is being sent every tile is disabled', () => {
-    const html = markup(true);
+  test('a 5x5 tile is a fifth of the board, placed by its row and column', () => {
+    const html = markup(savedGame(TWENTY_FOUR_RIGHT, false));
 
-    assert.match(html, /data-testid="tile-8" disabled="">8</);
-    assert.doesNotMatch(html, /data-testid="tile-\d+">/);
+    assert.match(
+      html,
+      / data-board="1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,0,24" class="sp-board sp-size-5">/,
+    );
+    assert.match(
+      html,
+      /data-tile="24" aria-label="Tile 24" aria-disabled="false" style="width:calc\(100% \/ 5\);height:calc\(100% \/ 5\);transform:translate\(400%, 400%\)"/,
+    );
+    assert.match(
+      html,
+      /data-tile="1" aria-label="Tile 1" aria-disabled="true" style="width:calc\(100% \/ 5\);height:calc\(100% \/ 5\);transform:translate\(0%, 0%\)"/,
+    );
+  });
+
+  test('on a 5x5 board exactly the tiles next to the blank can move', () => {
+    const html = markup(savedGame(TWENTY_FOUR_RIGHT, false));
+
+    assert.deepEqual(
+      html.match(/data-tile="\d+"(?= aria-label="Tile \d+" aria-disabled="false")/g),
+      ['data-tile="19"', 'data-tile="23"', 'data-tile="24"'],
+    );
+  });
+
+  test('a finished game marks the board as won and no tile can move', () => {
+    const html = markup(savedGame(TWENTY_FOUR_RIGHT, true));
+
+    assert.match(html, / class="sp-board sp-size-5 sp-won">/);
+    assert.doesNotMatch(html, /aria-disabled="false"/);
   });
 });

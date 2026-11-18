@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { tallyGame } from '../test-support/tally-game.ts';
-import { savedGameSchema } from './index.ts';
+import { batchIdSchema, savedGameSchema } from './index.ts';
 
 const SAVED = {
   state: { count: 1, target: 5 },
@@ -34,5 +34,11 @@ describe('savedGameSchema', () => {
     const result = schema.safeParse({ ...SAVED, version: 0 });
 
     assert.equal(result.success, false);
+  });
+
+  test('a batch id is 8-40 letters, digits, dashes and underscores, and nothing around them', () => {
+    assert.equal(batchIdSchema.safeParse('7-2_abcXYZ').success, true);
+    assert.equal(batchIdSchema.safeParse('!7-2-abcdef').success, false);
+    assert.equal(batchIdSchema.safeParse('7-2-abcdef!').success, false);
   });
 });

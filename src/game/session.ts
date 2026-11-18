@@ -21,7 +21,7 @@ function showFailure<State>(target: SessionTarget<State>, failure: unknown): voi
 }
 
 export interface SessionTarget<State> {
-  setGame: (game: SavedGame<State> | undefined) => void;
+  setGame: (game: SavedGame<State>) => void;
   setMessage: (message: string | undefined) => void;
   setBusy: (busy: boolean) => void;
   /** Synchronous guard: a click that lands before React re-renders must still be ignored. */

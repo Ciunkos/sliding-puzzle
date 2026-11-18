@@ -59,3 +59,47 @@ export async function openSwitcher(page: Page): Promise<void> {
     await switcher.locator('summary').click();
   }
 }
+
+/** Tile buttons that can slide now: tiles that cannot are aria-disabled (they stay focusable). */
+export const movableTiles = (page: Page) =>
+  page.locator('button[data-testid^="tile-"]:not([aria-disabled="true"])');
+/** The button that starts a new game of `size` x `size`. */
+export const sizeChoice = (page: Page, size: number) => page.getByTestId(`size-${String(size)}`);
+
+/**
+ * Drags the pointer from the middle of tile `number` by (dx, dy) pixels in small steps: a swipe.
+ * Uses the mouse, which both projects support; the board reads pointer events, whatever the device.
+ */
+export async function swipeFromTile(
+  page: Page,
+  number: number,
+  dx: number,
+  dy: number,
+): Promise<void> {
+  const box = await tile(page, number).boundingBox();
+  expect(box, `tile ${String(number)} is on screen`).not.toBeNull();
+  const x = (box?.x ?? 0) + (box?.width ?? 0) / 2;
+  const y = (box?.y ?? 0) + (box?.height ?? 0) / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y + dy, { steps: 6 });
+  await page.mouse.up();
+}
+
+/** The game's message line: an error, or a notice such as being offline. */
+export const gameMessage = (page: Page) => page.getByTestId('game-error');
+
+/**
+ * Opens the profile in `page` until it shows `movesText`: the browser that played may still be
+ * sending its moves, so a page that opened too early is opened again.
+ */
+export async function openProfileUntilMoves(
+  page: Page,
+  nickname: string,
+  movesText: string,
+): Promise<void> {
+  await expect(async () => {
+    await openProfile(page, nickname);
+    await expect(moves(page)).toHaveText(movesText, { timeout: 1000 });
+  }).toPass();
+}

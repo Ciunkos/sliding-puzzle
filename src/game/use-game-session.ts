@@ -1,44 +1,78 @@
-// React state for one profile's game: resumes it (one atomic request), then runs one action at a
-// time. Moves and resets carry the version of the game on screen, so the server can tell a stale one.
+// React glue for one profile's game: a SessionDriver (session-driver.ts) per profile, wired to the
+// browser's storage, network and visibility events. `game` is the optimistic game: a tap shows at
+// once, and moves reach the server in batches, also after being made offline.
 import { useEffect, useRef, useState } from 'react';
 import type { GameApi } from './api.ts';
-import type { SavedGame } from './index.ts';
-import { runRequest, type SessionTarget } from './session.ts';
+import type { BestResult } from './index.ts';
+import type { QueueStorage } from './queue-storage.ts';
+import { type DriverEnvironment, SessionDriver, type SessionView } from './session-driver.ts';
 
-export interface GameSession<State, Move> {
-  /** Undefined while loading, or when loading failed. */
-  game: SavedGame<State> | undefined;
-  message: string | undefined;
+export interface GameSession<State, Move> extends SessionView<State> {
+  /** Undefined while loading, or when loading failed. The optimistic game. */
+  game: SessionView<State>['game'];
+  /** True only for a new game, a reset and the initial load; never for moves. */
   busy: boolean;
   start: () => void;
   move: (move: Move) => void;
   reset: () => void;
+  results: readonly BestResult[];
+  /** Active play time by `now` (Date.now()); call it on every tick of the screen's timer. */
+  elapsedMs: (now: number) => number;
 }
 
-/** The session's React state, plus the target that runRequest writes into. */
-function useSessionState<State>() {
-  const [game, setGameState] = useState<SavedGame<State> | undefined>(undefined);
-  // The game on screen, readable without waiting for a re-render: its version goes with each request.
-  const latest = useRef<SavedGame<State> | undefined>(undefined);
-  const [message, setMessage] = useState<string | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
-  // Bumped whenever the nickname changes, so responses for an earlier profile are ignored.
-  const session = useRef(0);
-  const inFlight = useRef(false);
-  const setGame = (next: SavedGame<State> | undefined) => {
-    latest.current = next;
-    setGameState(next);
+/** Storage that keeps nothing, for a browser without (usable) localStorage. */
+const NO_STORAGE: QueueStorage = {
+  getItem: () => null,
+  setItem: () => undefined,
+  removeItem: () => undefined,
+};
+
+/** The browser's localStorage, or NO_STORAGE when it is absent or access itself throws. */
+function browserStorage(): QueueStorage {
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return NO_STORAGE;
+  }
+}
+
+/** The browser around the driver. Time and timers are read here, at the edge. */
+function browserEnvironment(): DriverEnvironment {
+  return {
+    storage: browserStorage(),
+    isOnline: () => globalThis.navigator.onLine,
+    isVisible: () => globalThis.document.visibilityState !== 'hidden',
+    now: () => Date.now(),
+    schedule: (run, ms) => {
+      const timer = setTimeout(run, ms);
+      return () => {
+        clearTimeout(timer);
+      };
+    },
   };
-  const target: SessionTarget<State> = { setGame, setMessage, setBusy, inFlight };
-  return { game, message, busy, session, target, latest };
 }
 
-/** Runs one request at a time for the current session; a request while one is in flight is ignored. */
-function performer<State>(target: SessionTarget<State>, session: { current: number }) {
-  return (request: () => Promise<SavedGame<State>>): void => {
-    if (target.inFlight.current) return;
-    const current = session.current;
-    void runRequest(target, () => session.current === current, request);
+const LOADING: SessionView<never> = {
+  game: undefined,
+  message: undefined,
+  notice: undefined,
+  busy: true,
+  syncing: false,
+  results: [],
+};
+
+/** Feeds the browser's online and visibility events to `driver`; returns the unsubscribe. */
+function listen(driver: {
+  online: () => Promise<void>;
+  visibility: (visible: boolean) => Promise<void>;
+}): () => void {
+  const online = () => void driver.online();
+  const visibility = () => void driver.visibility(document.visibilityState !== 'hidden');
+  window.addEventListener('online', online);
+  document.addEventListener('visibilitychange', visibility);
+  return () => {
+    window.removeEventListener('online', online);
+    document.removeEventListener('visibilitychange', visibility);
   };
 }
 
@@ -48,41 +82,26 @@ export function useGameSession<State, Move, Options>(
   nickname: string,
   options: Options,
 ): GameSession<State, Move> {
-  const { game, message, busy, session, target, latest } = useSessionState<State>();
+  const [view, setView] = useState<SessionView<State>>(LOADING);
+  const driver = useRef<SessionDriver<State, Move, Options> | undefined>(undefined);
 
   useEffect(() => {
-    const current = ++session.current;
-    target.setGame(undefined);
-    void runRequest(
-      target,
-      () => session.current === current,
-      () => api.resume(nickname, options),
-    );
+    const current = new SessionDriver(api, nickname, options, browserEnvironment(), setView);
+    driver.current = current;
+    setView(LOADING);
+    void current.load();
+    const unlisten = listen(current);
     return () => {
-      session.current++;
+      current.dispose();
+      unlisten();
     };
-    // `target` holds only setters and refs that do not change behaviour, so it is not a dependency.
   }, [api, nickname, options]);
 
-  const perform = performer(target, session);
-  /** A request on the game on screen, made on its version; nothing to do without a game. */
-  const performOnGame = (request: (baseVersion: number) => Promise<SavedGame<State>>) => {
-    const shown = latest.current;
-    if (shown !== undefined) perform(() => request(shown.version));
-  };
-
   return {
-    game,
-    message,
-    busy,
-    start: () => {
-      perform(() => api.start(nickname, options));
-    },
-    move: (move) => {
-      performOnGame((baseVersion) => api.move(nickname, move, baseVersion));
-    },
-    reset: () => {
-      performOnGame((baseVersion) => api.reset(nickname, baseVersion));
-    },
+    ...view,
+    start: () => void driver.current?.start(),
+    move: (move) => void driver.current?.move(move),
+    reset: () => void driver.current?.reset(),
+    elapsedMs: (now) => driver.current?.elapsedMs(now) ?? 0,
   };
 }

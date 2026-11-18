@@ -1,7 +1,7 @@
 // The games table over the Db port. Rows are never trusted: every read is validated.
 import { z } from 'zod';
 import type { Db } from '../db/index.ts';
-import type { SavedGame } from './index.ts';
+import type { BestResult, SavedGame } from './index.ts';
 
 /** Which saved game: one per profile per game id. */
 export interface GameKey {
@@ -18,15 +18,22 @@ const storedRow = z.object({
   version: z.number().int(),
   started_at: z.string(),
   finished_at: z.string().nullable(),
+  last_batch_id: z.string().nullable(),
 });
 
 const startedRows = z.tuple([z.object({ version: z.number().int().min(1) })]);
 
-function parseRow<State>(raw: unknown, schema: z.ZodType<SavedGame<State>>): SavedGame<State> {
+/** A saved game together with the id of the last batch of moves applied to it (null: none). */
+export interface StoredGame<State> {
+  game: SavedGame<State>;
+  lastBatchId: string | null;
+}
+
+function parseRow<State>(raw: unknown, schema: z.ZodType<SavedGame<State>>): StoredGame<State> {
   const row = storedRow.parse(raw);
   const state: unknown = JSON.parse(row.state);
   const initial: unknown = JSON.parse(row.initial);
-  return schema.parse({
+  const game = schema.parse({
     state,
     initial,
     moves: row.moves,
@@ -35,14 +42,25 @@ function parseRow<State>(raw: unknown, schema: z.ZodType<SavedGame<State>>): Sav
     startedAt: row.started_at,
     finishedAt: row.finished_at,
   });
+  return { game, lastBatchId: row.last_batch_id };
 }
 
 function selectRow(db: Db, key: GameKey) {
   return db.get(
-    `SELECT state, initial, moves, finished, version, started_at, finished_at
+    `SELECT state, initial, moves, finished, version, started_at, finished_at, last_batch_id
        FROM games WHERE profile_id = ? AND game_id = ?`,
     [key.profileId, key.gameId],
   );
+}
+
+/** The stored game with its last batch id, or undefined when the profile has none. */
+export async function readStoredGame<State>(
+  db: Db,
+  key: GameKey,
+  schema: z.ZodType<SavedGame<State>>,
+): Promise<StoredGame<State> | undefined> {
+  const row = await selectRow(db, key);
+  return row === undefined ? undefined : parseRow(row, schema);
 }
 
 export async function readGame<State>(
@@ -50,8 +68,7 @@ export async function readGame<State>(
   key: GameKey,
   schema: z.ZodType<SavedGame<State>>,
 ): Promise<SavedGame<State> | undefined> {
-  const row = await selectRow(db, key);
-  return row === undefined ? undefined : parseRow(row, schema);
+  return (await readStoredGame(db, key, schema))?.game;
 }
 
 /** A game that must exist; a missing row fails the row schema like any other bad row. */
@@ -60,7 +77,7 @@ export async function readExistingGame<State>(
   key: GameKey,
   schema: z.ZodType<SavedGame<State>>,
 ): Promise<SavedGame<State>> {
-  return parseRow(await selectRow(db, key), schema);
+  return parseRow(await selectRow(db, key), schema).game;
 }
 
 type FreshGame = Omit<SavedGame<unknown>, 'version'>;
@@ -93,7 +110,7 @@ export async function upsertGame(db: Db, key: GameKey, game: FreshGame): Promise
        ON CONFLICT(profile_id, game_id) DO UPDATE SET
          state = excluded.state, initial = excluded.initial, moves = excluded.moves,
          finished = excluded.finished, version = games.version + 1, started_at = excluded.started_at,
-         finished_at = excluded.finished_at, updated_at = excluded.updated_at
+         finished_at = excluded.finished_at, updated_at = excluded.updated_at, last_batch_id = NULL
        RETURNING version`,
     insertParams(key, game),
   );
@@ -110,19 +127,26 @@ export async function insertIfAbsent(db: Db, key: GameKey, game: FreshGame): Pro
   return changes > 0;
 }
 
-/** Compare-and-swap: writes `next` only if the stored version is still `expectedVersion`. */
-export async function saveIfVersion(
-  db: Db,
-  key: GameKey,
-  expectedVersion: number,
-  next: SavedGame<unknown>,
-  updatedAt: string,
-): Promise<boolean> {
-  const { changes } = await db.run(
-    `UPDATE games SET state = ?, initial = ?, moves = ?, finished = ?, version = ?,
-         started_at = ?, finished_at = ?, updated_at = ?
+/** The result row a finishing move writes (see migrations/0005_results.sql). */
+export type ResultRow = Omit<BestResult, 'finishedAt'>;
+
+/** What a compare-and-swap writes: the next game, the batch that made it, and its result if it finished. */
+export interface Swap {
+  expectedVersion: number;
+  next: SavedGame<unknown>;
+  updatedAt: string;
+  /** Null for a write that cannot be replayed: a single move or a reset. */
+  batchId: string | null;
+  result?: ResultRow;
+}
+
+function updateStatement(key: GameKey, swap: Swap) {
+  const { next } = swap;
+  return {
+    sql: `UPDATE games SET state = ?, initial = ?, moves = ?, finished = ?, version = ?,
+         started_at = ?, finished_at = ?, updated_at = ?, last_batch_id = ?
        WHERE profile_id = ? AND game_id = ? AND version = ?`,
-    [
+    params: [
       JSON.stringify(next.state),
       JSON.stringify(next.initial),
       next.moves,
@@ -130,11 +154,92 @@ export async function saveIfVersion(
       next.version,
       next.startedAt,
       next.finishedAt,
-      updatedAt,
+      swap.updatedAt,
+      swap.batchId,
       key.profileId,
       key.gameId,
-      expectedVersion,
+      swap.expectedVersion,
     ],
+  };
+}
+
+/**
+ * The result insert, guarded by the same version condition as the update and run before it in one
+ * batch: both apply, or neither does.
+ */
+function resultStatement(key: GameKey, swap: Swap, result: ResultRow) {
+  return {
+    sql: `INSERT OR IGNORE INTO results
+         (profile_id, game_id, version, variant, moves, duration_ms, reported_ms, finished_at)
+       SELECT profile_id, game_id, ?, ?, ?, ?, ?, ?
+         FROM games WHERE profile_id = ? AND game_id = ? AND version = ?`,
+    params: [
+      swap.next.version,
+      result.variant,
+      result.moves,
+      result.durationMs,
+      result.reportedMs,
+      swap.next.finishedAt,
+      key.profileId,
+      key.gameId,
+      swap.expectedVersion,
+    ],
+  };
+}
+
+const swapMark = z.object({ version: z.number().int(), last_batch_id: z.string().nullable() });
+
+/**
+ * Compare-and-swap: writes `swap.next` only if the stored version is still `expectedVersion`.
+ * A finishing write also inserts its result in the same atomic batch; a batch reports no changes,
+ * so whether it won is read back from the row: the new version with this batch id.
+ */
+export async function saveIfVersion(db: Db, key: GameKey, swap: Swap): Promise<boolean> {
+  const update = updateStatement(key, swap);
+  if (swap.result === undefined) {
+    const { changes } = await db.run(update.sql, update.params);
+    return changes > 0;
+  }
+  await db.batch([resultStatement(key, swap, swap.result), update]);
+  const mark = swapMark.parse(
+    await db.get('SELECT version, last_batch_id FROM games WHERE profile_id = ? AND game_id = ?', [
+      key.profileId,
+      key.gameId,
+    ]),
   );
-  return changes > 0;
+  return mark.version === swap.next.version && mark.last_batch_id === swap.batchId;
+}
+
+const resultRows = z.array(
+  z.object({
+    variant: z.string(),
+    moves: z.number().int(),
+    duration_ms: z.number().int(),
+    reported_ms: z.number().int().nullable(),
+    finished_at: z.string(),
+  }),
+);
+
+/**
+ * The best `limit` results of each variant: fewest moves, then the shortest time (the reported
+ * active time when there is one, else the server-observed duration), then the earliest.
+ */
+export async function bestResults(db: Db, key: GameKey, limit: number): Promise<BestResult[]> {
+  const rows = await db.all(
+    `SELECT variant, moves, duration_ms, reported_ms, finished_at FROM (
+       SELECT *, ROW_NUMBER() OVER (
+           PARTITION BY variant
+           ORDER BY moves, COALESCE(reported_ms, duration_ms), finished_at, version
+         ) AS place
+         FROM results WHERE profile_id = ? AND game_id = ?
+     ) WHERE place <= ? ORDER BY variant, place`,
+    [key.profileId, key.gameId, limit],
+  );
+  return resultRows.parse(rows).map((row) => ({
+    variant: row.variant,
+    moves: row.moves,
+    durationMs: row.duration_ms,
+    reportedMs: row.reported_ms,
+    finishedAt: row.finished_at,
+  }));
 }

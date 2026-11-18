@@ -4,6 +4,7 @@ import type { ReactElement } from 'react';
 
 export * from './index.ts';
 export { createGameApi, type GameApi } from './api.ts';
+export { isNewPersonalBest } from './results.ts';
 export { useGameSession, type GameSession } from './use-game-session.ts';
 
 /** What a game feature hands to the web composition root. */

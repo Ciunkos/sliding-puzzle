@@ -6,11 +6,14 @@ import { createTestProfile } from '../test-support/profiles.ts';
 import {
   ALWAYS_HIGH,
   ALWAYS_LOW,
+  contextRecordingTally,
+  playTallyGames,
   type TallyMove,
   type TallyOptions,
   type TallyState,
   tallyGame,
 } from '../test-support/tally-game.ts';
+import type { MoveContext } from './index.ts';
 import { createGameService, type GameService, InvalidStartStateError } from './service.ts';
 
 type TallyService = GameService<TallyState, TallyMove, TallyOptions>;
@@ -408,6 +411,295 @@ describe('the game service', () => {
     assert.deepEqual(results, [
       { created: true, game: CREATED },
       { created: false, game: CREATED },
+    ]);
+  });
+});
+
+const AT_FIVE = '2026-01-01T00:05:00.000Z';
+const BATCH = { baseVersion: 1, batchId: 'batch-one', moves: [{ add: 1 }, { add: 2 }] };
+
+/** Ada's game to `target`, started at midnight, and a service on a clock five minutes later. */
+async function startedAtMidnight(target: number) {
+  const { db, service, id } = await setup();
+  await service.start(id, { target });
+  const later = createGameService(db, tallyGame, FIVE_MINUTES_LATER);
+  return { service, later, id };
+}
+
+describe('a batch of moves', () => {
+  test('a legal batch on the stored version applies every move and counts each as a version', async () => {
+    // Given a new game to 9 at version 1
+    const { service, id } = await setup();
+    await service.start(id, { target: 9 });
+
+    // When 1 and 2 are added in one batch
+    const result = await service.applyMoves(id, BATCH);
+
+    // Then both count: 3 after two moves, at version 3
+    assert.deepEqual(result, {
+      ok: true,
+      game: {
+        state: { count: 3, target: 9 },
+        initial: { count: 0, target: 9 },
+        moves: 2,
+        finished: false,
+        version: 3,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: null,
+      },
+    });
+  });
+
+  test('a batch with one illegal move applies none of them and answers with the stored game', async () => {
+    // Given a new game to 9
+    const { service, id } = await setup();
+    await service.start(id, { target: 9 });
+
+    // When the illegal 4, then 1, are added in one batch
+    const result = await service.applyMoves(id, { ...BATCH, moves: [{ add: 4 }, { add: 1 }] });
+
+    // Then nothing changed and the answer carries the untouched game
+    const UNTOUCHED = {
+      state: { count: 0, target: 9 },
+      initial: { count: 0, target: 9 },
+      moves: 0,
+      finished: false,
+      version: 1,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: null,
+    };
+    assert.deepEqual(result, { ok: false, reason: 'illegal-move', game: UNTOUCHED });
+    assert.deepEqual(await service.get(id), UNTOUCHED);
+  });
+
+  test('the same batch again after it was applied is a replay answered with the stored game', async () => {
+    // Given a batch that was applied, but whose answer was lost
+    const { service, id } = await setup();
+    await service.start(id, { target: 9 });
+    await service.applyMoves(id, BATCH);
+
+    // When the browser retries it with the same batch id
+    const result = await service.applyMoves(id, BATCH);
+
+    // Then it is acknowledged with the stored game, and the moves count once
+    const APPLIED_ONCE = {
+      state: { count: 3, target: 9 },
+      initial: { count: 0, target: 9 },
+      moves: 2,
+      finished: false,
+      version: 3,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: null,
+    };
+    assert.deepEqual(result, { ok: true, game: APPLIED_ONCE });
+    assert.deepEqual(await service.get(id), APPLIED_ONCE);
+  });
+
+  test('another batch on a version that has moved on is stale', async () => {
+    // Given a batch applied on version 1
+    const { service, id } = await setup();
+    await service.start(id, { target: 9 });
+    await service.applyMoves(id, BATCH);
+
+    // When another batch made on version 1 arrives (a second tab)
+    const result = await service.applyMoves(id, { ...BATCH, batchId: 'batch-two' });
+
+    // Then it is stale and carries the stored game
+    assert.deepEqual(result, {
+      ok: false,
+      reason: 'stale',
+      game: {
+        state: { count: 3, target: 9 },
+        initial: { count: 0, target: 9 },
+        moves: 2,
+        finished: false,
+        version: 3,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: null,
+      },
+    });
+  });
+
+  test('a replay after a reset is stale: a reset forgets the last batch', async () => {
+    // Given a batch applied on version 1, then a reset
+    const { service, id } = await setup();
+    await service.start(id, { target: 9 });
+    await service.applyMoves(id, BATCH);
+    await service.reset(id, 3);
+
+    // When the batch is retried
+    const result = await service.applyMoves(id, BATCH);
+
+    // Then it is stale against the reset game
+    assert.partialDeepStrictEqual(result, { ok: false, reason: 'stale' });
+  });
+
+  test('a move after the finishing move makes the whole batch illegal', async () => {
+    // Given a game to 2
+    const { service, id } = await setup();
+    await service.start(id, { target: 2 });
+
+    // When 2 (finishing) and then 1 are added in one batch
+    const result = await service.applyMoves(id, { ...BATCH, moves: [{ add: 2 }, { add: 1 }] });
+
+    // Then nothing is applied
+    assert.deepEqual(result, {
+      ok: false,
+      reason: 'illegal-move',
+      game: {
+        state: { count: 0, target: 2 },
+        initial: { count: 0, target: 2 },
+        moves: 0,
+        finished: false,
+        version: 1,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: null,
+      },
+    });
+  });
+
+  test('a batch on a finished game is already finished and carries the game', async () => {
+    const { service, id } = await setup();
+    await service.start(id, { target: 1 });
+    await service.applyMoves(id, { ...BATCH, moves: [{ add: 1 }] });
+
+    const result = await service.applyMoves(id, { ...BATCH, baseVersion: 2, batchId: 'batch-two' });
+
+    assert.partialDeepStrictEqual(result, { ok: false, reason: 'already-finished' });
+  });
+
+  test('a batch without a game answers no-game', async () => {
+    const { service, id } = await setup();
+
+    assert.deepEqual(await service.applyMoves(id, BATCH), { ok: false, reason: 'no-game' });
+  });
+
+  test('apply gets the service clock and randomness as its context', async () => {
+    // Given a game whose apply records its context, on a service five minutes after midnight
+    const { db, id } = await setup();
+    const seen: (MoveContext | undefined)[] = [];
+    const service = createGameService(db, contextRecordingTally(seen), FIVE_MINUTES_LATER);
+    await service.start(id, { target: 9 });
+
+    // When one move is applied
+    await service.applyMoves(id, { ...BATCH, moves: [{ add: 1 }] });
+
+    // Then apply saw that clock and that random
+    assert.deepEqual(seen, [{ now: LATER, random: ALWAYS_LOW }]);
+  });
+
+  test('reset starts the clock of the game again', async () => {
+    const { later, id } = await startedAtMidnight(5);
+
+    const result = await later.reset(id, 1);
+
+    assert.partialDeepStrictEqual(result, { ok: true, game: { startedAt: AT_FIVE } });
+  });
+});
+
+describe('the best results', () => {
+  test('a finishing batch stores a result with the server time and the reported time clamped to it', async () => {
+    // Given a game to 3 started at midnight
+    const { later, id } = await startedAtMidnight(3);
+
+    // When it is finished five minutes later, the browser claiming seven minutes of play
+    await later.applyMoves(id, { ...BATCH, moves: [{ add: 3 }], elapsedMs: 420_000 });
+
+    // Then the result has the five minutes the server saw, for both times
+    assert.deepEqual(await later.results(id), [
+      {
+        variant: 'to 3',
+        moves: 1,
+        durationMs: 300_000,
+        reportedMs: 300_000,
+        finishedAt: '2026-01-01T00:05:00.000Z',
+      },
+    ]);
+  });
+
+  test('a game whose definition names no variant is of the default variant', async () => {
+    const { db, id } = await setup();
+    const plain = createGameService(db, { ...tallyGame, variant: undefined }, AT_MIDNIGHT);
+    await plain.start(id, { target: 1 });
+
+    await plain.applyMoves(id, { ...BATCH, moves: [{ add: 1 }] });
+
+    assert.partialDeepStrictEqual(await plain.results(id), [{ variant: 'default' }]);
+  });
+
+  test('a game finished without a reported time stores the server time alone', async () => {
+    const { later, id } = await startedAtMidnight(3);
+
+    await later.move(id, { add: 3 }, 1);
+
+    assert.deepEqual(await later.results(id), [
+      {
+        variant: 'to 3',
+        moves: 1,
+        durationMs: 300_000,
+        reportedMs: null,
+        finishedAt: '2026-01-01T00:05:00.000Z',
+      },
+    ]);
+  });
+
+  test('results are grouped by variant, fewest moves first, then the shortest time', async () => {
+    // Given games to 3 in one move (90 s and 60 s), in two moves, and a game to 2
+    const { service, later, id } = await startedAtMidnight(3);
+    await playTallyGames(service, later, id, [
+      { target: 3, adds: [1, 2], elapsedMs: 10_000 },
+      { target: 3, adds: [3], elapsedMs: 90_000 },
+      { target: 2, adds: [2], elapsedMs: 5_000 },
+      { target: 3, adds: [3], elapsedMs: 60_000 },
+    ]);
+
+    // When the results are listed
+    const results = await service.results(id);
+
+    // Then each variant lists its best first
+    assert.deepEqual(results, [
+      { variant: 'to 2', moves: 1, durationMs: 300_000, reportedMs: 5_000, finishedAt: AT_FIVE },
+      { variant: 'to 3', moves: 1, durationMs: 300_000, reportedMs: 60_000, finishedAt: AT_FIVE },
+      { variant: 'to 3', moves: 1, durationMs: 300_000, reportedMs: 90_000, finishedAt: AT_FIVE },
+      { variant: 'to 3', moves: 2, durationMs: 300_000, reportedMs: 10_000, finishedAt: AT_FIVE },
+    ]);
+  });
+
+  test('only the best five results of a variant are listed', async () => {
+    const { service, later, id } = await startedAtMidnight(1);
+    await playTallyGames(service, later, id, [
+      { target: 1, adds: [1], elapsedMs: 6 },
+      { target: 1, adds: [1], elapsedMs: 5 },
+      { target: 1, adds: [1], elapsedMs: 4 },
+      { target: 1, adds: [1], elapsedMs: 3 },
+      { target: 1, adds: [1], elapsedMs: 2 },
+      { target: 1, adds: [1], elapsedMs: 1 },
+    ]);
+
+    const results = await service.results(id);
+
+    assert.deepEqual(results, [
+      { variant: 'to 1', moves: 1, durationMs: 300_000, reportedMs: 1, finishedAt: AT_FIVE },
+      { variant: 'to 1', moves: 1, durationMs: 300_000, reportedMs: 2, finishedAt: AT_FIVE },
+      { variant: 'to 1', moves: 1, durationMs: 300_000, reportedMs: 3, finishedAt: AT_FIVE },
+      { variant: 'to 1', moves: 1, durationMs: 300_000, reportedMs: 4, finishedAt: AT_FIVE },
+      { variant: 'to 1', moves: 1, durationMs: 300_000, reportedMs: 5, finishedAt: AT_FIVE },
+    ]);
+  });
+
+  test('of two finishing batches at the same time, one wins and only its result is stored', async () => {
+    // Given a game to 3 at version 1
+    const { later, id } = await startedAtMidnight(3);
+
+    // When two different finishing batches made on version 1 arrive at the same time
+    const first = later.applyMoves(id, { ...BATCH, moves: [{ add: 3 }], elapsedMs: 1000 });
+    const second = later.applyMoves(id, { ...BATCH, batchId: 'batch-two', moves: [{ add: 3 }] });
+    const results = await Promise.all([first, second]);
+
+    // Then the first is applied, the second is stale, and one result is stored
+    assert.partialDeepStrictEqual(results, [{ ok: true }, { ok: false, reason: 'stale' }]);
+    assert.deepEqual(await later.results(id), [
+      { variant: 'to 3', moves: 1, durationMs: 300_000, reportedMs: 1000, finishedAt: AT_FIVE },
     ]);
   });
 });

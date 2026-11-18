@@ -9,6 +9,17 @@ import { ALWAYS_LOW, tallyGame } from '../test-support/tally-game.ts';
 import { featureRoutes } from './server.ts';
 
 const ADA_GAME = '/api/profiles/Ada/games/tally';
+const MOVES_FROM_1 = '{"baseVersion":1,"batchId":"batch-one","moves":[{"add":1},{"add":2}]}';
+/** A new game to 5, as started by the routes. */
+const STARTED = {
+  state: { count: 0, target: 5 },
+  initial: { count: 0, target: 5 },
+  moves: 0,
+  finished: false,
+  version: 1,
+  startedAt: '2026-01-01T00:00:00.000Z',
+  finishedAt: null,
+};
 
 /** The tally game's routes over a fresh database that has one profile, Ada. */
 async function setup() {
@@ -233,5 +244,104 @@ describe('the game routes', () => {
 
     assert.equal(res.status, 400);
     assert.deepEqual(await res.json(), { error: 'invalid reset request' });
+  });
+
+  test('a legal batch of moves is 200 with the moved game', async () => {
+    const app = await started('');
+
+    const res = await post(app, `${ADA_GAME}/moves`, MOVES_FROM_1);
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      state: { count: 3, target: 5 },
+      initial: { count: 0, target: 5 },
+      moves: 2,
+      finished: false,
+      version: 3,
+      startedAt: '2026-01-01T00:00:00.000Z',
+      finishedAt: null,
+    });
+  });
+
+  test('an illegal batch is 409 with the stored game', async () => {
+    const app = await started('');
+
+    const body = '{"baseVersion":1,"batchId":"batch-one","moves":[{"add":4}]}';
+    const res = await post(app, `${ADA_GAME}/moves`, body);
+
+    assert.equal(res.status, 409);
+    assert.deepEqual(await res.json(), { error: 'illegal move', game: STARTED });
+  });
+
+  test('a batch on an outdated version is 409 stale with the stored game', async () => {
+    const app = await started('');
+    await post(app, `${ADA_GAME}/reset`, '{"baseVersion":1}');
+
+    const res = await post(app, `${ADA_GAME}/moves`, MOVES_FROM_1);
+
+    assert.equal(res.status, 409);
+    assert.deepEqual(await res.json(), {
+      error: 'stale',
+      game: {
+        state: { count: 0, target: 5 },
+        initial: { count: 0, target: 5 },
+        moves: 0,
+        finished: false,
+        version: 2,
+        startedAt: '2026-01-01T00:00:00.000Z',
+        finishedAt: null,
+      },
+    });
+  });
+
+  test('a batch whose id is not 8-40 letters, digits, dashes or underscores is 400', async () => {
+    const app = await started('');
+
+    const body = '{"baseVersion":1,"batchId":"short","moves":[{"add":1}]}';
+    const res = await post(app, `${ADA_GAME}/moves`, body);
+
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: 'invalid moves request' });
+  });
+
+  test('a batch of more than 64 moves is 400', async () => {
+    const app = await started('{"target":100}');
+    const moves = Array<{ add: number }>(65).fill({ add: 1 });
+
+    const body = JSON.stringify({ baseVersion: 1, batchId: 'batch-one', moves });
+    const res = await post(app, `${ADA_GAME}/moves`, body);
+
+    assert.equal(res.status, 400);
+  });
+
+  test('a negative reported time is 400', async () => {
+    const app = await started('');
+
+    const body = '{"baseVersion":1,"batchId":"batch-one","moves":[{"add":1}],"elapsedMs":-1}';
+    const res = await post(app, `${ADA_GAME}/moves`, body);
+
+    assert.equal(res.status, 400);
+  });
+
+  test('the results are 200 with the best results of the profile', async () => {
+    const app = await started('{"target":1}');
+    await post(
+      app,
+      `${ADA_GAME}/moves`,
+      '{"baseVersion":1,"batchId":"batch-one","moves":[{"add":1}],"elapsedMs":0}',
+    );
+
+    const res = await app.request(`${ADA_GAME}/results`);
+
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), [
+      {
+        variant: 'to 1',
+        moves: 1,
+        durationMs: 0,
+        reportedMs: 0,
+        finishedAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
   });
 });

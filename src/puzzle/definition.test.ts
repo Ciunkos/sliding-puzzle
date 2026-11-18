@@ -18,6 +18,20 @@ const TWELVE_DOWN = grid`
   13 14 15 12
 `;
 
+/** The end of a walk that always slides the lowest-numbered tile it may (see shuffle.ts). */
+const AFTER_LOWEST_WALK_3 = grid`
+  4 3 _
+  5 2 1
+  7 8 6
+`;
+const AFTER_LOWEST_WALK_5 = grid`
+   6  3  1  4  5
+   7  _  2  8  9
+  11 12 13 14 10
+  16 17 18 19 15
+  21 22 23 24 20
+`;
+
 describe('puzzleDefinition', () => {
   test('a new game is a board shuffled with the given random source', () => {
     // Given a source that always picks the lowest-numbered tile it may move
@@ -35,6 +49,26 @@ describe('puzzleDefinition', () => {
         13 14 15 12
       `,
     });
+  });
+
+  test('the size option chooses a 3x3 or a 5x5 board', () => {
+    // Given sources that always pick the lowest-numbered tile, one walk long for each size
+    const three = puzzleDefinition.start({ size: 3 }, scriptedRng(repeated([0], 96)));
+    const five = puzzleDefinition.start({ size: 5 }, scriptedRng(repeated([0], 616)));
+
+    // Then each board is the end of its walk
+    assert.deepEqual(three, { board: AFTER_LOWEST_WALK_3 });
+    assert.deepEqual(five, { board: AFTER_LOWEST_WALK_5 });
+  });
+
+  test('the variant of a game is its board size, e.g. "4x4"', () => {
+    const variants = [
+      puzzleDefinition.variant({ board: AFTER_LOWEST_WALK_3 }),
+      puzzleDefinition.variant({ board: SOLVED }),
+      puzzleDefinition.variant({ board: AFTER_LOWEST_WALK_5 }),
+    ];
+
+    assert.deepEqual(variants, ['3x3', '4x4', '5x5']);
   });
 
   test('a legal move gives the board after the slide', () => {
@@ -75,13 +109,33 @@ describe('puzzleDefinition', () => {
     assert.equal(puzzleDefinition.stateSchema.safeParse(repeatedTile).success, false);
   });
 
-  test('a move must name a whole tile number from 1 to 15', () => {
+  test('a stored 3x3 or 5x5 state is accepted too', () => {
+    const three = {
+      board: grid`
+      1 2 3
+      4 5 6
+      7 8 _
+    `,
+    };
+
+    assert.equal(puzzleDefinition.stateSchema.safeParse(three).success, true);
+    assert.equal(
+      puzzleDefinition.stateSchema.safeParse({ board: AFTER_LOWEST_WALK_5 }).success,
+      true,
+    );
+  });
+
+  test('a move must name a whole tile number from 1 to 24', () => {
     assert.equal(puzzleDefinition.moveSchema.safeParse({ tile: 0 }).success, false);
-    assert.equal(puzzleDefinition.moveSchema.safeParse({ tile: 16 }).success, false);
+    assert.equal(puzzleDefinition.moveSchema.safeParse({ tile: 25 }).success, false);
     assert.equal(puzzleDefinition.moveSchema.safeParse({ tile: 1.5 }).success, false);
   });
 
-  test('new-game options with an unknown field are rejected', () => {
-    assert.equal(puzzleDefinition.optionsSchema.safeParse({ size: 5 }).success, false);
+  test('new-game options take a size of 3, 4 or 5 and nothing else', () => {
+    const parse = (value: unknown) => puzzleDefinition.optionsSchema.safeParse(value).success;
+
+    assert.deepEqual([parse({}), parse({ size: 3 }), parse({ size: 5 })], [true, true, true]);
+    assert.deepEqual([parse({ size: 6 }), parse({ size: '4' })], [false, false]);
+    assert.equal(parse({ colour: 'red' }), false);
   });
 });

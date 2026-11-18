@@ -14,17 +14,30 @@ const SAVED = {
   finishedAt: null,
 };
 
+const RESULT = {
+  variant: 'to 5',
+  moves: 5,
+  durationMs: 9000,
+  reportedMs: 8000,
+  finishedAt: '2026-01-01T00:00:09.000Z',
+};
+
 /** An API client whose every request is answered with `reply`. */
 function answering(reply: () => Response) {
   return createGameApi(tallyGame, '/sliding-puzzle/api', () => Promise.resolve(reply()));
 }
 
-/** An API client that pushes the url and init of every request to `sent` and answers SAVED. */
-function recording(sent: unknown[]) {
+/** An API client that pushes the url and init of every request to `sent` and answers `body`. */
+function recordingWith(sent: unknown[], body: unknown) {
   return createGameApi(tallyGame, '/sliding-puzzle/api', (url, init) => {
     sent.push(url, init);
-    return Promise.resolve(Response.json(SAVED));
+    return Promise.resolve(Response.json(body));
   });
+}
+
+/** An API client that pushes the url and init of every request to `sent` and answers SAVED. */
+function recording(sent: unknown[]) {
+  return recordingWith(sent, SAVED);
 }
 
 describe('the game API client', () => {
@@ -121,5 +134,53 @@ describe('the game API client', () => {
       status: 200,
       message: 'Unexpected response from the server',
     });
+  });
+
+  test('a batch of moves is posted to the moves route with its version, id and moves', async () => {
+    const sent: unknown[] = [];
+    const api = recording(sent);
+
+    const moves = [{ add: 1 }, { add: 2 }];
+    await api.sendMoves('Ada', { baseVersion: 2, batchId: 'batch-one', moves, elapsedMs: 900 });
+
+    assert.deepEqual(sent, [
+      '/sliding-puzzle/api/profiles/Ada/games/tally/moves',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"baseVersion":2,"batchId":"batch-one","moves":[{"add":1},{"add":2}],"elapsedMs":900}',
+      },
+    ]);
+  });
+
+  test('a 409 that carries a game becomes a StaleGameError with the server message', async () => {
+    const api = answering(() =>
+      Response.json({ error: 'illegal move', game: SAVED }, { status: 409 }),
+    );
+
+    const request = { baseVersion: 2, batchId: 'batch-one', moves: [{ add: 4 }] };
+    await assert.rejects(api.sendMoves('Ada', request), {
+      name: 'StaleGameError',
+      message: 'illegal move',
+      game: SAVED,
+    });
+  });
+
+  test('the results are fetched from the results route and parsed', async () => {
+    const sent: unknown[] = [];
+    const api = recordingWith(sent, [RESULT]);
+
+    const results = await api.results('Ada');
+
+    assert.deepEqual(
+      [sent, results],
+      [['/sliding-puzzle/api/profiles/Ada/games/tally/results', {}], [RESULT]],
+    );
+  });
+
+  test('results that are not results are rejected', async () => {
+    const api = answering(() => Response.json([{ variant: 'to 5' }]));
+
+    await assert.rejects(api.results('Ada'), { message: 'Unexpected response from the server' });
   });
 });

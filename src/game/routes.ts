@@ -1,8 +1,9 @@
-// Hono routes of one game: /api/profiles/:nickname/games/:gameId (GET, PUT, POST), .../move, .../reset.
+// Hono routes of one game: /api/profiles/:nickname/games/:gameId (GET, PUT, POST), .../moves,
+// .../move, .../reset, .../results.
 import { type Context, Hono } from 'hono';
 import { z } from 'zod';
-import type { GameDefinition } from './index.ts';
-import type { GameFailure, GameResult, GameService } from './service.ts';
+import { batchIdSchema, type GameDefinition, MAX_BATCH } from './index.ts';
+import type { BatchResult, GameFailure, GameResult, GameService } from './service.ts';
 
 /** What the engine needs from the profile module: resolve a nickname to an id. */
 export interface ProfileLookup {
@@ -18,10 +19,12 @@ const FAILURES: Record<GameFailure, { status: 404 | 409; error: string }> = {
 const baseVersion = z.number().int().min(1);
 const resetBody = z.object({ baseVersion });
 
-function respond<State>(c: Context, result: GameResult<State>): Response {
+function respond<State>(c: Context, result: GameResult<State> | BatchResult<State>): Response {
   if (result.ok) return c.json(result.game, 200);
   if (result.reason === 'stale') return c.json({ error: 'stale', game: result.game }, 409);
   const failure = FAILURES[result.reason];
+  // A rejected batch carries the stored game, so the browser can adopt it.
+  if ('game' in result) return c.json({ error: failure.error, game: result.game }, failure.status);
   return c.json({ error: failure.error }, failure.status);
 }
 
@@ -47,13 +50,39 @@ function profileGuard(profiles: ProfileLookup) {
   };
 }
 
+const invalid = (c: Context, error: string) => c.json({ error }, 400);
+
+/** The handlers of a batch of moves and of a single move. */
+function moveHandlers<State, Move>(
+  definition: GameDefinition<State, Move, unknown>,
+  service: GameService<State, Move, unknown>,
+) {
+  const moveBody = z.object({ baseVersion, move: definition.moveSchema });
+  const movesBody = z.object({
+    baseVersion,
+    batchId: batchIdSchema,
+    moves: z.array(definition.moveSchema).min(1).max(MAX_BATCH),
+    elapsedMs: z.number().int().min(0).optional(),
+  });
+  return {
+    moves: async (c, profileId) => {
+      const body = movesBody.safeParse(await readBody(c));
+      if (!body.success) return invalid(c, 'invalid moves request');
+      return respond(c, await service.applyMoves(profileId, body.data));
+    },
+    move: async (c, profileId) => {
+      const body = moveBody.safeParse(await readBody(c));
+      if (!body.success) return invalid(c, 'invalid move request');
+      return respond(c, await service.move(profileId, body.data.move, body.data.baseVersion));
+    },
+  } satisfies Record<string, ProfileHandler>;
+}
+
 /** The handler of every route of one game, each for an already resolved profile. */
 function handlers<State, Move, Options>(
   definition: GameDefinition<State, Move, Options>,
   service: GameService<State, Move, Options>,
 ) {
-  const moveBody = z.object({ baseVersion, move: definition.moveSchema });
-  const invalid = (c: Context, error: string) => c.json({ error }, 400);
   /** A handler that gets the game options from the body; invalid options are 400. */
   const withOptions =
     (run: (c: Context, profileId: number, options: Options) => Promise<Response>): ProfileHandler =>
@@ -77,11 +106,8 @@ function handlers<State, Move, Options>(
     start: withOptions(async (c, profileId, options) =>
       c.json(await service.start(profileId, options), 201),
     ),
-    move: async (c, profileId) => {
-      const body = moveBody.safeParse(await readBody(c));
-      if (!body.success) return invalid(c, 'invalid move request');
-      return respond(c, await service.move(profileId, body.data.move, body.data.baseVersion));
-    },
+    ...moveHandlers(definition, service),
+    results: async (c, profileId) => c.json(await service.results(profileId), 200),
     reset: async (c, profileId) => {
       const body = resetBody.safeParse(await readBody(c));
       if (!body.success) return invalid(c, 'invalid reset request');
@@ -102,7 +128,9 @@ export function gameRoutes<State, Move, Options>(
   app.get(base, withProfile(handle.get));
   app.put(base, withProfile(handle.resume));
   app.post(base, withProfile(handle.start));
+  app.post(`${base}/moves`, withProfile(handle.moves));
   app.post(`${base}/move`, withProfile(handle.move));
+  app.get(`${base}/results`, withProfile(handle.results));
   app.post(`${base}/reset`, withProfile(handle.reset));
   return app;
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import fc from 'fast-check';
 import { grid } from '../test-support/grid.ts';
-import { isSolvable, isSolved, isValidBoard, shuffle } from './index.ts';
+import { isSolvable, isSolved, isValidBoard, SIZES, shuffle, sizeOf } from './index.ts';
 import { createRng } from './rng.ts';
 
 // Known answers: mulberry32 from its published definition, run as a one-off script outside this
@@ -31,7 +31,7 @@ describe('shuffle with a seeded rng', () => {
   test('seed 1 always shuffles to the same board', () => {
     // Characterisation, not an outside answer: the board shuffle(createRng(1)) gave when this was
     // written. It changes when the walk or the generator changes, which is the point.
-    const board = shuffle(createRng(1));
+    const board = shuffle(4, createRng(1));
 
     assert.deepEqual(
       board,
@@ -44,12 +44,17 @@ describe('shuffle with a seeded rng', () => {
     );
   });
 
-  test('any seed shuffles to a valid, solvable, unsolved board', () => {
+  test('any seed shuffles to a valid, solvable, unsolved board of the asked size', () => {
+    const seed = fc.integer({ min: 0, max: 0xffffffff });
     fc.assert(
-      fc.property(fc.integer({ min: 0, max: 0xffffffff }), (s) => {
-        const board = shuffle(createRng(s));
-        assert.equal(isValidBoard(board), true);
-        assert.equal(isSolvable(board), true);
+      fc.property(fc.constantFrom(...SIZES), seed, (size, s) => {
+        const board = shuffle(size, createRng(s));
+        const facts = {
+          size: sizeOf(board),
+          valid: isValidBoard(board),
+          solvable: isSolvable(board),
+        };
+        assert.deepEqual(facts, { size, valid: true, solvable: true });
         assert.equal(isSolved(board), false);
       }),
     );

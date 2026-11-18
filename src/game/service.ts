@@ -1,13 +1,23 @@
 // The generic game service: one saved game per profile per game id, over the Db port.
 import type { z } from 'zod';
 import type { Db } from '../db/index.ts';
-import { type GameDefinition, type SavedGame, savedGameSchema } from './index.ts';
 import {
+  type BestResult,
+  type GameDefinition,
+  type MoveContext,
+  type SavedGame,
+  savedGameSchema,
+} from './index.ts';
+import {
+  bestResults,
   type GameKey,
   insertIfAbsent,
   readExistingGame,
   readGame,
+  readStoredGame,
+  type ResultRow,
   saveIfVersion,
+  type StoredGame,
   upsertGame,
 } from './store.ts';
 
@@ -21,6 +31,22 @@ export type GameResult<State> =
   | { ok: true; game: SavedGame<State> }
   | { ok: false; reason: GameFailure }
   | { ok: false; reason: 'stale'; game: SavedGame<State> };
+
+/** Moves the browser applied optimistically on the game at `baseVersion`, sent together. */
+export interface MoveBatch<Move> {
+  baseVersion: number;
+  /** Made up by the browser; the same id again after the stored game moved on is a replay. */
+  batchId: string;
+  moves: readonly Move[];
+  /** Active play time the browser measured; used only when the batch finishes the game. */
+  elapsedMs?: number;
+}
+
+/** Every failure but no-game carries the stored game: the server's game wins. */
+export type BatchResult<State> =
+  | { ok: true; game: SavedGame<State> }
+  | { ok: false; reason: 'no-game' }
+  | { ok: false; reason: 'stale' | 'illegal-move' | 'already-finished'; game: SavedGame<State> };
 
 export interface Resumed<State> {
   game: SavedGame<State>;
@@ -37,10 +63,18 @@ export interface GameService<State, Move, Options> {
   /** Like start, but from a chosen state. Throws InvalidStartStateError unless the state matches
    * the state schema and the definition accepts it as a start. */
   startWith(profileId: number, state: State): Promise<SavedGame<State>>;
-  /** Applies `move` to the game at `baseVersion`, the version the caller made it on. */
+  /**
+   * Applies all moves of `batch` atomically, or none. On another version than `baseVersion` it is
+   * stale, unless the stored game's last batch is this very batch: then it is a replay of a batch
+   * whose answer was lost, and the answer is the stored game.
+   */
+  applyMoves(profileId: number, batch: MoveBatch<Move>): Promise<BatchResult<State>>;
+  /** One move on the game at `baseVersion`: a batch of one that can never count as a replay. */
   move(profileId: number, move: Move, baseVersion: number): Promise<GameResult<State>>;
-  /** Resets the game at `baseVersion` back to its initial state. */
+  /** Resets the game at `baseVersion` back to its initial state, starting its clock again. */
   reset(profileId: number, baseVersion: number): Promise<GameResult<State>>;
+  /** The profile's best results per variant: fewest moves, then shortest time; top 5 each. */
+  results(profileId: number): Promise<BestResult[]>;
 }
 
 export interface GameServiceOptions {
@@ -55,41 +89,84 @@ export class InvalidStartStateError extends Error {
   }
 }
 
-type Step<State> = (current: SavedGame<State>, now: string) => GameResult<State>;
+/** How many best results of each variant are listed. */
+const RESULTS_PER_VARIANT = 5;
 
-/** The step of a move: apply it, count it, and record when it finishes the game. */
-function moveStep<State, Move>(
+type StepOutcome<State> =
+  | { ok: true; game: SavedGame<State>; result?: ResultRow }
+  | { ok: false; reason: 'illegal-move' | 'already-finished' };
+
+type Step<State> = (current: SavedGame<State>, now: Date) => StepOutcome<State>;
+
+/** `moves` applied in order; undefined when one is illegal or follows a move that finished the game. */
+function applyAll<State, Move>(
   definition: GameDefinition<State, Move, unknown>,
-  move: Move,
+  state: State,
+  moves: readonly Move[],
+  context: MoveContext,
+): State | undefined {
+  let current: State | undefined = state;
+  for (const move of moves) {
+    if (current === undefined || definition.isFinished(current)) return undefined;
+    current = definition.apply(current, move, context);
+  }
+  return current;
+}
+
+/** The result of a game that `now` finished: the server's duration, the browser's clamped to it. */
+function resultOf<State>(
+  definition: GameDefinition<State, unknown, unknown>,
+  game: SavedGame<State>,
+  now: Date,
+  elapsedMs: number | undefined,
+): ResultRow {
+  const durationMs = Math.max(0, now.getTime() - Date.parse(game.startedAt));
+  return {
+    variant: definition.variant?.(game.state) ?? 'default',
+    moves: game.moves,
+    durationMs,
+    reportedMs: elapsedMs === undefined ? null : Math.min(elapsedMs, durationMs),
+  };
+}
+
+/** The step of a batch: apply every move, count them, and record when the last one finishes the game. */
+function batchStep<State, Move>(
+  definition: GameDefinition<State, Move, unknown>,
+  random: () => number,
+  batch: Omit<MoveBatch<Move>, 'baseVersion' | 'batchId'>,
 ): Step<State> {
   return (current, now) => {
     if (current.finished) return { ok: false, reason: 'already-finished' };
-    const state = definition.apply(current.state, move);
+    const state = applyAll(definition, current.state, batch.moves, { now, random });
     if (state === undefined) return { ok: false, reason: 'illegal-move' };
     const finished = definition.isFinished(state);
     const game = {
       ...current,
       state,
-      moves: current.moves + 1,
+      moves: current.moves + batch.moves.length,
       finished,
-      version: current.version + 1,
+      version: current.version + batch.moves.length,
+      finishedAt: finished ? now.toISOString() : null,
     };
-    return { ok: true, game: { ...game, finishedAt: finished ? now : null } };
+    if (!finished) return { ok: true, game };
+    return { ok: true, game, result: resultOf(definition, game, now, batch.elapsedMs) };
   };
 }
 
-/** The step of a reset: back to the initial state, no moves. */
+/** The step of a reset: back to the initial state, no moves, and the clock starts again now. */
 function resetStep<State>(definition: GameDefinition<State, unknown, unknown>): Step<State> {
   return (current, now) => {
     const finished = definition.isFinished(current.initial);
+    const at = now.toISOString();
     const game = {
       ...current,
       state: current.initial,
       moves: 0,
       finished,
       version: current.version + 1,
+      startedAt: at,
     };
-    return { ok: true, game: { ...game, finishedAt: finished ? now : null } };
+    return { ok: true, game: { ...game, finishedAt: finished ? at : null } };
   };
 }
 
@@ -105,30 +182,54 @@ function keyOf(engine: Engine<unknown, unknown, unknown>, profileId: number): Ga
   return { profileId, gameId: engine.definition.id };
 }
 
+/** A write on the game at `baseVersion`; `batchId` null when it can never be a replay. */
+interface Write<State> {
+  baseVersion: number;
+  batchId: string | null;
+  step: Step<State>;
+}
+
+/** The answer to a write made on another version: a replay of the last batch, or stale. */
+function notCurrent<State>(stored: StoredGame<State>, batchId: string | null): BatchResult<State> {
+  if (batchId !== null && stored.lastBatchId === batchId) return { ok: true, game: stored.game };
+  return { ok: false, reason: 'stale', game: stored.game };
+}
+
 /**
  * Read, check the caller's version, compute, compare-and-swap. No retry: a request made on another
- * version is stale, and the caller decides what to do with the current game. When the swap loses to
- * another writer, running again reads the newer game and answers stale: versions only grow, so the
- * stored version can never be `baseVersion` again.
+ * version is stale (or a replay), and the caller decides what to do with the current game. When
+ * the swap loses to another writer, one more read answers stale with what is stored now: no retry
+ * and no recursion, so a request can never loop.
  */
 async function mutate<State>(
   engine: Engine<State, unknown, unknown>,
   profileId: number,
-  baseVersion: number,
-  step: Step<State>,
-): Promise<GameResult<State>> {
+  write: Write<State>,
+): Promise<BatchResult<State>> {
   const key = keyOf(engine, profileId);
-  const current = await readGame(engine.db, key, engine.schema);
-  if (current === undefined) return { ok: false, reason: 'no-game' };
-  if (current.version !== baseVersion) return { ok: false, reason: 'stale', game: current };
-  const now = engine.now().toISOString();
-  const result = step(current, now);
-  if (!result.ok) return result;
-  if (await saveIfVersion(engine.db, key, baseVersion, result.game, now)) return result;
-  // Another writer got in between the read and the write: answer with what is stored now.
-  // One read, no retry and no recursion, so a request can never loop.
+  const stored = await readStoredGame(engine.db, key, engine.schema);
+  if (stored === undefined) return { ok: false, reason: 'no-game' };
+  const current = stored.game;
+  if (current.version !== write.baseVersion) return notCurrent(stored, write.batchId);
+  const now = engine.now();
+  const outcome = write.step(current, now);
+  if (!outcome.ok) return { ...outcome, game: current };
+  const swap = {
+    expectedVersion: write.baseVersion,
+    next: outcome.game,
+    updatedAt: now.toISOString(),
+    batchId: write.batchId,
+    result: outcome.result,
+  };
+  if (await saveIfVersion(engine.db, key, swap)) return { ok: true, game: outcome.game };
   const latest = await readExistingGame(engine.db, key, engine.schema);
   return { ok: false, reason: 'stale', game: latest };
+}
+
+/** A batch answer as a single-move answer: illegal and finished carry no game there. */
+function single<State>(result: BatchResult<State>): GameResult<State> {
+  if (result.ok || result.reason === 'stale') return result;
+  return { ok: false, reason: result.reason };
 }
 
 /** A game that starts at `state` now: no moves, finished only if `state` already is. */
@@ -187,6 +288,8 @@ export function createGameService<State, Move, Options>(
 ): GameService<State, Move, Options> {
   const schema = savedGameSchema(definition.stateSchema);
   const engine: Engine<State, Move, Options> = { db, definition, schema, now: options.now };
+  const movesStep = (batch: Omit<MoveBatch<Move>, 'baseVersion' | 'batchId'>) =>
+    batchStep(definition, options.random, batch);
 
   return {
     get: (profileId) => readGame(db, keyOf(engine, profileId), schema),
@@ -198,9 +301,24 @@ export function createGameService<State, Move, Options>(
       if (!isAcceptableStart(definition, state)) throw new InvalidStartStateError(definition.id);
       return startFrom(engine, profileId, state);
     },
-    move: (profileId, move, baseVersion) =>
-      mutate(engine, profileId, baseVersion, moveStep(definition, move)),
-    reset: (profileId, baseVersion) =>
-      mutate(engine, profileId, baseVersion, resetStep(definition)),
+    applyMoves: (profileId, { baseVersion, batchId, ...batch }) =>
+      mutate(engine, profileId, { baseVersion, batchId, step: movesStep(batch) }),
+    move: async (profileId, move, baseVersion) =>
+      single(
+        await mutate(engine, profileId, {
+          baseVersion,
+          batchId: null,
+          step: movesStep({ moves: [move] }),
+        }),
+      ),
+    reset: async (profileId, baseVersion) =>
+      single(
+        await mutate(engine, profileId, {
+          baseVersion,
+          batchId: null,
+          step: resetStep(definition),
+        }),
+      ),
+    results: (profileId) => bestResults(db, keyOf(engine, profileId), RESULTS_PER_VARIANT),
   };
 }
