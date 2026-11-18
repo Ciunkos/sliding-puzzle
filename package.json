@@ -8,11 +8,11 @@
   },
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
-    "dev": "node --watch src/server/node.ts & vite",
+    "dev": "node scripts/dev.js",
     "build": "vite build",
     "test": "npm run lint && npm run typecheck && npm run test:unit && npm run build",
     "test:unit": "node --test \"src/**/*.test.ts\"",
-    "test:e2e": "playwright test --pass-with-no-tests",
+    "test:e2e": "playwright test",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",
