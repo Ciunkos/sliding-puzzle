@@ -8,6 +8,9 @@ import {
   bestOf,
   formatElapsed,
   layout,
+  pictureBackground,
+  skinOptions,
+  skinPicture,
   resultLine,
   resultText,
   showSaving,
@@ -263,5 +266,77 @@ describe('showSaving', () => {
 
   test('nothing is shown while nothing is being saved', () => {
     assert.equal(showSaving(undefined, 5_000), false);
+  });
+});
+
+describe('pictureBackground', () => {
+  test('on a 3x3 board the picture is three tiles wide, tile 1 shows its top-left ninth', () => {
+    assert.deepEqual(pictureBackground(1, 3, 'a.svg'), {
+      backgroundImage: 'url("a.svg")',
+      backgroundSize: '300% 300%',
+      backgroundPosition: '0% 0%',
+    });
+  });
+
+  test('on a 3x3 board tile 5 shows the middle ninth and tile 9 the bottom-right corner', () => {
+    assert.deepEqual(
+      [
+        pictureBackground(5, 3, 'a.svg').backgroundPosition,
+        pictureBackground(9, 3, 'a.svg').backgroundPosition,
+      ],
+      ['50% 50%', '100% 100%'],
+    );
+  });
+
+  test('on a 4x4 board tile 7 shows the square in the second row, third column', () => {
+    assert.deepEqual(pictureBackground(7, 4, 'data:image/jpeg;base64,AA'), {
+      backgroundImage: 'url("data:image/jpeg;base64,AA")',
+      backgroundSize: '400% 400%',
+      backgroundPosition: '66.667% 33.333%',
+    });
+  });
+});
+
+describe('skinOptions', () => {
+  test('the picker offers numbers first, then the five pictures by title, each picture with its SVG', () => {
+    const options = skinOptions(undefined);
+
+    assert.equal(options.length, 6);
+    assert.partialDeepStrictEqual(options, [
+      { id: 'numbers', title: 'Numbers', thumbnail: undefined },
+      { id: 'rocket', title: 'Rocket' },
+      { id: 'cat', title: 'Cat' },
+      { id: 'balloon', title: 'Balloon' },
+      { id: 'fish', title: 'Fish' },
+      { id: 'castle', title: 'Castle' },
+    ]);
+    assert.match(
+      JSON.stringify(options),
+      /"thumbnail":"data:image\/svg\+xml,%3Csvg%20.+%3C%2Fsvg%3E"}\]$/,
+    );
+  });
+
+  test('a stored photo is offered last as "Your photo", with itself as the thumbnail', () => {
+    const options = skinOptions('data:image/jpeg;base64,AA');
+
+    assert.deepEqual(options.slice(6), [
+      { id: 'photo', title: 'Your photo', thumbnail: 'data:image/jpeg;base64,AA' },
+    ]);
+  });
+});
+
+describe('skinPicture', () => {
+  test('numbers show no picture, the photo skin shows the photo, a picture skin its SVG', () => {
+    assert.deepEqual(
+      [
+        skinPicture('numbers', 'data:image/jpeg;base64,AA'),
+        skinPicture('photo', 'data:image/jpeg;base64,AA'),
+      ],
+      [undefined, 'data:image/jpeg;base64,AA'],
+    );
+    assert.match(
+      String(skinPicture('fish', undefined)),
+      /^data:image\/svg\+xml,%3Csvg%20.+%3C%2Fsvg%3E$/,
+    );
   });
 });

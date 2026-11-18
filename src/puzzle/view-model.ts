@@ -1,6 +1,8 @@
 // Plain view logic of the puzzle screen.
 import type { BestResult, SavedGame } from '../game/index.ts';
 import type { PuzzleState } from './definition.ts';
+import { PICTURE_IDS, pictureOf, svgUrl } from './pictures.ts';
+import type { SkinId } from './preferences.ts';
 import { applyMove, type Board, legalMoves, type Size, sizeOf } from './rules.ts';
 
 /** A cell of the board: row and column from the top-left, 0-based. */
@@ -133,4 +135,49 @@ export function announcement(before: Board | undefined, game: SavedGame<PuzzleSt
   const tile = before === undefined ? undefined : movedTile(before, game.state.board);
   if (tile === undefined) return '';
   return `Moved tile ${String(tile)}. ${countMoves(game.moves)}.`;
+}
+
+/** A percentage with at most three decimals: "50%", "66.667%". */
+function percent(value: number): string {
+  return `${String(Math.round(value * 1000) / 1000)}%`;
+}
+
+/** The CSS that shows tile `tile`'s square of a picture on a `size`-wide board (tile N*N: the corner). */
+export function pictureBackground(
+  tile: number,
+  size: Size,
+  url: string,
+): { backgroundImage: string; backgroundSize: string; backgroundPosition: string } {
+  const home = placeOf(tile - 1, size);
+  const step = 100 / (size - 1);
+  return {
+    backgroundImage: `url("${url}")`,
+    backgroundSize: `${String(size * 100)}% ${String(size * 100)}%`,
+    backgroundPosition: `${percent(home.col * step)} ${percent(home.row * step)}`,
+  };
+}
+
+/** A choice in the skin picker: its id, its label, and the image of its thumbnail (none for numbers). */
+export interface SkinOption {
+  id: SkinId;
+  title: string;
+  thumbnail: string | undefined;
+}
+
+/** Numbers, the bundled pictures, and the player's photo when there is one. */
+export function skinOptions(photo: string | undefined): SkinOption[] {
+  const pictures = PICTURE_IDS.map((id) => {
+    const picture = pictureOf(id);
+    return { id, title: picture.title, thumbnail: svgUrl(picture.svg) };
+  });
+  const own: SkinOption[] =
+    photo === undefined ? [] : [{ id: 'photo', title: 'Your photo', thumbnail: photo }];
+  return [{ id: 'numbers', title: 'Numbers', thumbnail: undefined }, ...pictures, ...own];
+}
+
+/** The image a skin shows on the tiles: undefined for numbers. */
+export function skinPicture(skin: SkinId, photo: string | undefined): string | undefined {
+  if (skin === 'numbers') return undefined;
+  if (skin === 'photo') return photo;
+  return svgUrl(pictureOf(skin).svg);
 }

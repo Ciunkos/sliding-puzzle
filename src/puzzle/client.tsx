@@ -1,6 +1,16 @@
 // Client entry: the puzzle's client-side feature (its screen). Logic lives in plain .ts files.
 // The shell (src/web) renders the page's <main> and <h1>; this screen is a section inside it.
-import { type ReactElement, useId, useMemo, useState } from 'react';
+import {
+  Component,
+  lazy,
+  type ReactElement,
+  type ReactNode,
+  Suspense,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+} from 'react';
 import {
   type BestResult,
   type ClientFeature,
@@ -10,27 +20,78 @@ import {
   type SavedGame,
   useGameSession,
 } from '../game/client.tsx';
-import { BoardView } from './board-view.tsx';
+import { type BoardLook, BoardView } from './board-view.tsx';
 import {
   type PuzzleMove,
   type PuzzleOptions,
   type PuzzleState,
   puzzleDefinition,
 } from './definition.ts';
+import { LookControls } from './look-controls.tsx';
+import {
+  pictureDescription,
+  sceneNote,
+  type SceneStatus,
+  sceneSkin,
+  tiltMode,
+} from './look-model.ts';
+import { shownSkin } from './preferences.ts';
 import { type Size, SIZES, sizeOf } from './rules.ts';
 import { css } from './styles.ts';
 import { useAnnouncement } from './use-announcement.ts';
+import { type LookChoices, useLook } from './use-look.ts';
+import { useMedia } from './use-media.ts';
 import { useNow } from './use-now.ts';
+import { type OrientationTilt, useOrientationTilt } from './use-orientation-tilt.ts';
+import { useQuietOnline } from './use-quiet-online.ts';
 import { useSavingHint } from './use-saving-hint.ts';
+import { type SceneSurface, useSceneSurface } from './use-scene-surface.ts';
+import type { Board3DProps } from './use-three-board.ts';
 import {
   bestOf,
   formatElapsed,
   resultLine,
   resultText,
   sizeLabel,
+  skinPicture,
   solvedText,
   statusText,
 } from './view-model.ts';
+
+/** Stands in for the 3D board when its chunk cannot load (offline before it was ever fetched). */
+function SceneUnavailable(props: Board3DProps): ReactElement {
+  const { onLost } = props;
+  useEffect(() => {
+    onLost();
+  }, [onLost]);
+  return <></>;
+}
+
+/**
+ * The 3D board, its own chunk: three.js loads only when the 3D board is about to be drawn. A chunk
+ * that cannot load is not an error to report: the flat board simply stays.
+ */
+const Board3D = lazy(() => import('./board-3d.tsx').catch(() => ({ default: SceneUnavailable })));
+
+/** Any error in the 3D board (a failed chunk load, a scene error) brings back the flat board. */
+class SceneBoundary extends Component<
+  { onError: () => void; children: ReactNode },
+  { failed: boolean }
+> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+
+  override componentDidCatch(): void {
+    this.props.onError();
+  }
+
+  override render(): ReactNode {
+    return this.state.failed ? null : this.props.children;
+  }
+}
 
 type Session = GameSession<PuzzleState, PuzzleMove>;
 type Game = SavedGame<PuzzleState>;
@@ -75,22 +136,51 @@ function Win(props: { game: Game; elapsed: number; newBest: boolean }): ReactEle
   );
 }
 
-/** The board, or a square of the same size while the game loads. */
-function Stage(props: { session: Session }): ReactElement {
+/** The 3D board as drawn for the screen: everything it needs except the game. */
+type SceneProps = Omit<Board3DProps, 'board' | 'size' | 'finished' | 'moves'>;
+
+/** The lazy 3D board for `game`, guarded: an error brings back the flat board. */
+function Scene3D(props: { scene: SceneProps; game: Game }): ReactElement {
+  const { scene, game } = props;
+  return (
+    <SceneBoundary onError={scene.onLost}>
+      <Suspense fallback={null}>
+        <Board3D
+          {...scene}
+          board={game.state.board}
+          size={sizeOf(game.state.board) ?? DEFAULT_SIZE}
+          finished={game.finished}
+          moves={game.moves}
+        />
+      </Suspense>
+    </SceneBoundary>
+  );
+}
+
+/** The board, or a square of the same size while the game loads; the 3D board under it. */
+function Stage(props: {
+  session: Session;
+  look: BoardLook;
+  scene: SceneProps | undefined;
+}): ReactElement {
   const { game, message } = props.session;
   if (game === undefined) {
     return (
-      <div className="sp-board sp-placeholder" data-testid="board-placeholder">
-        {message === undefined ? 'Loading…' : null}
+      <div className="sp-stage">
+        <div className="sp-board sp-placeholder" data-testid="board-placeholder">
+          {message === undefined ? 'Loading…' : null}
+        </div>
       </div>
     );
   }
   return (
     <div className="sp-stage">
+      {props.scene === undefined ? null : <Scene3D scene={props.scene} game={game} />}
       {/* Keyed by size: a new size gets new tiles instead of sliding them out of the old board. */}
       <BoardView
         key={game.state.board.length}
         game={game}
+        look={props.look}
         onMove={(tile) => {
           props.session.move({ tile });
         }}
@@ -242,6 +332,126 @@ function usePlayTime(session: Session): number {
   return session.elapsedMs(useNow(playing));
 }
 
+function statusOf(surface: ReturnType<typeof useSceneSurface>): SceneStatus {
+  if (surface === undefined) return 'waiting';
+  return typeof surface === 'string' ? surface : 'shown';
+}
+
+/** How long the flat board stays alone before the 3D board's chunk is fetched. */
+const CHUNK_DELAY_MS = 400;
+
+/** The 3D board's state: wanted, probed, drawn (ready) or broken (failed). */
+function useSceneState(wanted: boolean) {
+  const [failed, setFailed] = useState(false);
+  const [ready, setReady] = useState(false);
+  const surface = useSceneSurface(wanted && !failed);
+  // A new surface (or none) has drawn nothing yet: the DOM board keeps its looks until it has.
+  useEffect(() => {
+    setReady(false);
+  }, [surface]);
+  const usable: SceneSurface | undefined =
+    wanted && !failed && typeof surface === 'object' ? surface : undefined;
+  const status = statusOf(surface);
+  // The chunk is fetched once the flat board has been up for a moment and there is a network.
+  const online = useQuietOnline(usable !== undefined, CHUNK_DELAY_MS);
+  const loading = online ? usable : undefined;
+  return {
+    failed,
+    setFailed,
+    ready: ready && loading !== undefined,
+    setReady,
+    usable: loading,
+    status,
+  };
+}
+
+type SceneState = ReturnType<typeof useSceneState>;
+
+function sceneProps(
+  state: SceneState,
+  drawn: Pick<SceneProps, 'skin' | 'dark' | 'reducedMotion' | 'tilt'>,
+): SceneProps | undefined {
+  if (state.usable === undefined) return undefined;
+  return {
+    ...drawn,
+    surface: state.usable,
+    onReady: () => {
+      state.setReady(true);
+    },
+    onLost: () => {
+      state.setFailed(true);
+    },
+  };
+}
+
+interface ScreenLook {
+  board: BoardLook;
+  scene: SceneProps | undefined;
+  note: string | undefined;
+  description: string | undefined;
+  descriptionId: string;
+  orientation: OrientationTilt;
+  retry: () => void;
+}
+
+function useScreenLook(choices: LookChoices): ScreenLook {
+  const { look, photo } = choices;
+  const state = useSceneState(look.scene3d);
+  const orientation = useOrientationTilt();
+  const reducedMotion = useMedia('(prefers-reduced-motion: reduce)');
+  const dark = useMedia('(prefers-color-scheme: dark)');
+  const finePointer = useMedia('(hover: hover) and (pointer: fine)');
+  const descriptionId = useId();
+  const skin = shownSkin(look.skin, photo !== undefined);
+  const picture = skinPicture(skin, photo);
+  const description = pictureDescription(skin);
+  const tilt = tiltMode({ reducedMotion, orientation: orientation.on, finePointer });
+  const scene = sceneProps(state, {
+    skin: sceneSkin(picture, look.numbers),
+    dark,
+    reducedMotion,
+    tilt,
+  });
+  return {
+    board: {
+      skin,
+      picture:
+        state.ready || picture === undefined ? undefined : { url: picture, badges: look.numbers },
+      layered: state.ready,
+      describedBy: description === undefined ? undefined : descriptionId,
+    },
+    scene,
+    note: sceneNote(look.scene3d, state.status, state.failed),
+    description,
+    descriptionId,
+    orientation: state.ready && !reducedMotion ? orientation : { ...orientation, available: false },
+    retry: () => {
+      state.setFailed(false);
+    },
+  };
+}
+
+function Look(props: { choices: LookChoices; screen: ScreenLook }): ReactElement {
+  const { choices, screen } = props;
+  return (
+    <>
+      <LookControls
+        {...choices}
+        sceneNote={screen.note}
+        tilt={screen.orientation.available ? { on: screen.orientation.on } : undefined}
+        onToggle3d={() => {
+          screen.retry();
+          choices.onToggle3d();
+        }}
+        onToggleTilt={screen.orientation.toggle}
+      />
+      <p id={screen.descriptionId} className="sp-visually-hidden">
+        {screen.description}
+      </p>
+    </>
+  );
+}
+
 function PuzzleScreen(props: { nickname: string; apiBase: string }): ReactElement {
   // Memoised: the session restarts when its api changes.
   const api = useMemo(() => createGameApi(puzzleDefinition, props.apiBase), [props.apiBase]);
@@ -252,6 +462,8 @@ function PuzzleScreen(props: { nickname: string; apiBase: string }): ReactElemen
   const announced = useAnnouncement(session.game);
   const elapsed = usePlayTime(session);
   const saving = useSavingHint(session.syncing);
+  const choices = useLook();
+  const screen = useScreenLook(choices);
   const current = session.game === undefined ? undefined : sizeOf(session.game.state.board);
   const startGame = (size: Size) => {
     if (session.busy) return;
@@ -263,7 +475,7 @@ function PuzzleScreen(props: { nickname: string; apiBase: string }): ReactElemen
     <section className="sp-puzzle" aria-label="Puzzle">
       <style>{css}</style>
       <Status game={session.game} elapsed={elapsed} saving={saving} />
-      <Stage session={session} />
+      <Stage session={session} look={screen.board} scene={screen.scene} />
       <Below session={session} elapsed={elapsed} />
       <Controls
         session={session}
@@ -272,6 +484,7 @@ function PuzzleScreen(props: { nickname: string; apiBase: string }): ReactElemen
         }}
       />
       <SizeChoice current={current} busy={session.busy} onPick={startGame} />
+      <Look choices={choices} screen={screen} />
       <Best game={session.game} results={session.results} />
       <p role="status" data-testid="announcer" className="sp-visually-hidden">
         {announced}

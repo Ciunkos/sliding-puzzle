@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { SavedGame } from '../game/index.ts';
 import { grid } from '../test-support/grid.ts';
 import type { PuzzleState } from './index.ts';
-import { BoardView } from './board-view.tsx';
+import { type BoardLook, BoardView } from './board-view.tsx';
 
 /** A 3x3 board with the blank in the middle: tiles 2, 4, 6 and 8 can slide into it. */
 const BLANK_IN_THE_MIDDLE = grid`
@@ -33,12 +33,18 @@ function savedGame(board: readonly number[], finished: boolean): SavedGame<Puzzl
   };
 }
 
+const PICTURE = {
+  skin: 'cat',
+  picture: { url: 'cat.svg', badges: true },
+  layered: false,
+  describedBy: 'about-cat',
+} as const;
+
 /** Static HTML, one element per line. */
-function markup(game: SavedGame<PuzzleState>): string {
-  return renderToStaticMarkup(<BoardView game={game} onMove={() => undefined} />).replaceAll(
-    '><',
-    '>\n<',
-  );
+function markup(game: SavedGame<PuzzleState>, look?: BoardLook): string {
+  return renderToStaticMarkup(
+    <BoardView game={game} onMove={() => undefined} look={look} />,
+  ).replaceAll('><', '>\n<');
 }
 
 const THIRD = 'width:calc(100% / 3);height:calc(100% / 3)';
@@ -124,5 +130,58 @@ describe('BoardView', () => {
 
     assert.match(html, / class="sp-board sp-size-5 sp-won">/);
     assert.doesNotMatch(html, /aria-disabled="false"/);
+    assert.match(html, /<div data-testid="tile-blank" class="sp-blank" style="[^"]+">\n<\/div>/);
+  });
+
+  test('a board without a chosen look shows numbers and is described by nothing more', () => {
+    const html = markup(savedGame(BLANK_IN_THE_MIDDLE, false));
+
+    assert.match(html, /aria-label="Sliding puzzle" data-skin="numbers" data-board=/);
+  });
+
+  test('a picture skin names itself and its description on the board', () => {
+    const html = markup(savedGame(BLANK_IN_THE_MIDDLE, false), PICTURE);
+
+    assert.match(
+      html,
+      /^<div data-testid="board" role="group" aria-label="Sliding puzzle" aria-describedby="about-cat" data-skin="cat" data-board=/,
+    );
+  });
+
+  test('a picture tile shows its square of the picture with a number badge, keeping its name', () => {
+    const html = markup(savedGame(BLANK_IN_THE_MIDDLE, false), PICTURE);
+
+    assert.match(
+      html,
+      /aria-label="Tile 6" aria-disabled="false" tabindex="-1" style="[^"]+">\n<span class="sp-face sp-picture" style="background-image:url\(&quot;cat.svg&quot;\);background-size:300% 300%;background-position:100% 50%">\n<span class="sp-badge">6<\/span>\n<\/span>/,
+    );
+  });
+
+  test('with numbers switched off a picture tile has no badge', () => {
+    const html = markup(savedGame(BLANK_IN_THE_MIDDLE, false), {
+      ...PICTURE,
+      picture: { url: 'cat.svg', badges: false },
+    });
+
+    assert.doesNotMatch(html, /sp-badge/);
+  });
+
+  test('a solved picture fills the gap with its missing corner', () => {
+    const html = markup(savedGame(TWENTY_FOUR_RIGHT, true), {
+      ...PICTURE,
+      picture: { url: 'fish.svg', badges: true },
+    });
+
+    assert.match(
+      html,
+      /<div data-testid="tile-blank" class="sp-blank" style="[^"]+">\n<span class="sp-face sp-corner" style="background-image:url\(&quot;fish.svg&quot;\);background-size:500% 500%;background-position:100% 100%">/,
+    );
+  });
+
+  test('an open game shows no corner, and a board drawn in 3D is marked as layered', () => {
+    const html = markup(savedGame(TWENTY_FOUR_RIGHT, false), { ...PICTURE, layered: true });
+
+    assert.doesNotMatch(html, /sp-corner/);
+    assert.match(html, / class="sp-board sp-size-5 sp-layered">/);
   });
 });

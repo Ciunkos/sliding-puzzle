@@ -6,7 +6,11 @@
 // Contrast (WCAG AA): white on tile #1f4fb8 is 7.3:1, on dark tile #3566d6 5.2:1, on won #13703a 6.2:1.
 import type { CSSProperties } from 'react';
 import type { Size } from './rules.ts';
+import { BOARD_BORDER_SHARE, SCENE_MARGIN_SHARE } from './scene-model.ts';
 import type { Place } from './view-model.ts';
+
+/** A share of the stage's width in container units: 0.025 -> "2.5cqw". */
+const cqw = (share: number) => `${String(Math.round(share * 1000) / 10)}cqw`;
 
 /** The size and position of one cell: a tile slides when its transform changes. */
 export function place(size: Size, at: Place): CSSProperties {
@@ -19,8 +23,8 @@ export function place(size: Size, at: Place): CSSProperties {
   };
 }
 
-export function boardClass(size: Size, finished: boolean): string {
-  return `sp-board sp-size-${String(size)}${finished ? ' sp-won' : ''}`;
+export function boardClass(size: Size, finished: boolean, layered = false): string {
+  return `sp-board sp-size-${String(size)}${finished ? ' sp-won' : ''}${layered ? ' sp-layered' : ''}`;
 }
 
 export const css = `
@@ -90,13 +94,14 @@ export const css = `
 .sp-status p { margin: 0; }
 .sp-board {
   position: relative;
+  z-index: 1;
   box-sizing: border-box;
   width: 100%;
   max-width: 28rem;
   aspect-ratio: 1 / 1;
   margin: 0 auto;
-  border: 4px solid var(--sp-well);
-  border-radius: 12px;
+  border: ${cqw(BOARD_BORDER_SHARE)} solid var(--sp-well);
+  border-radius: 3.5cqw;
   background: var(--sp-well);
   container-type: inline-size;
   touch-action: none;
@@ -109,14 +114,15 @@ export const css = `
   align-items: center;
   justify-content: center;
 }
-.sp-blank { position: absolute; top: 0; left: 0; }
+.sp-blank { position: absolute; top: 0; left: 0; box-sizing: border-box; padding: 1cqw; }
 .sp-tile {
   position: absolute;
   top: 0;
   left: 0;
   box-sizing: border-box;
   margin: 0;
-  padding: 3px;
+  /* 1% of the board on each side: the 3D tiles leave the same gap (use-three-parts.ts). */
+  padding: 1cqw;
   border: 0;
   background: transparent;
   color: inherit;
@@ -134,7 +140,7 @@ export const css = `
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  border-radius: 8px;
+  border-radius: 9%;
   background: var(--sp-tile);
   color: var(--sp-tile-text);
   font-weight: 700;
@@ -149,13 +155,52 @@ export const css = `
 .sp-size-4 .sp-tile { font-size: 9.5cqw; }
 .sp-size-5 .sp-tile { font-size: 7.5cqw; }
 .sp-won { animation: sp-pop 480ms ease-out; }
-.sp-won .sp-face { background: var(--sp-won); }
+.sp-won .sp-face { background-color: var(--sp-won); }
 @keyframes sp-pop {
   0% { transform: scale(1); }
   40% { transform: scale(1.04); }
   100% { transform: scale(1); }
 }
-.sp-stage { position: relative; max-width: 28rem; margin: 0 auto; }
+.sp-stage {
+  position: relative;
+  isolation: isolate;
+  max-width: 28rem;
+  margin: 0 auto;
+  /* The board's border and the 3D canvas are shares of this width (scene-model.ts). */
+  container-type: inline-size;
+}
+/* The 3D board: under the buttons, a little larger than the board for its rim, shadow and tilt. */
+.sp-scene {
+  position: absolute;
+  inset: -${cqw(SCENE_MARGIN_SHARE)};
+  z-index: 0;
+  pointer-events: none;
+}
+.sp-scene canvas { display: block; width: 100%; height: 100%; }
+/* A picture tile: its square of the picture (inline style), and the optional number badge. */
+.sp-face.sp-picture { position: relative; background-color: var(--sp-tile); box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.12); }
+.sp-badge {
+  position: absolute;
+  top: 5%;
+  left: 5%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5em;
+  height: 1.5em;
+  padding: 0 0.2em;
+  box-sizing: border-box;
+  border: 2px solid #fff;
+  border-radius: 0.75em;
+  background: rgb(17 17 17 / 0.82);
+  color: #fff;
+  font-size: 0.4em;
+}
+.sp-corner { display: block; animation: sp-fade 600ms ease-out; }
+@keyframes sp-fade {
+  from { transform: translateY(-12%) scale(1.06); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
 .sp-win { animation: sp-rise 320ms ease-out; }
 .sp-banner { margin: 0; color: var(--sp-won-text); font-size: 17px; font-weight: 700; }
 .sp-result { margin: 0; font-variant-numeric: tabular-nums; }
@@ -225,8 +270,85 @@ export const css = `
 .sp-sizes .sp-row { margin-top: 6px; }
 .sp-label { font-weight: 600; }
 .sp-hint { margin: 6px 0 0; color: var(--sp-muted); font-size: 14px; }
+/* The 3D board draws the tiles: the buttons stay exactly in place, see-through, so the focus
+   ring (a box-shadow, not opacity) still shows on the tile it belongs to. */
+.sp-layered { background: transparent; border-color: transparent; }
+.sp-layered.sp-won { animation: none; }
+.sp-layered .sp-face { background: transparent; color: transparent; box-shadow: none; }
+.sp-layered .sp-tile:focus-visible .sp-face {
+  box-shadow: 0 0 0 2px var(--sp-ring-inner), 0 0 0 5px var(--sp-ring-outer);
+}
+.sp-look { margin: 16px 0 0; }
+.sp-look > .sp-hint { margin-top: 6px; }
+.sp-skins { margin: 10px 0 0; }
+.sp-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 2px solid var(--sp-line);
+  border-radius: 6px;
+  background: var(--sp-button);
+  font-size: 16px;
+  cursor: pointer;
+}
+.sp-summary:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--sp-ring-inner), 0 0 0 5px var(--sp-ring-outer); }
+.sp-skin-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 8px;
+  margin: 10px 0 0;
+}
+.sp-skin {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 6px 4px;
+  border: 2px solid var(--sp-line);
+  border-radius: 8px;
+  background: var(--sp-button);
+  color: var(--sp-button-text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.sp-skin[aria-pressed='true'] {
+  background: var(--sp-pressed);
+  color: var(--sp-pressed-text);
+  font-weight: 700;
+}
+.sp-skin:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--sp-ring-inner), 0 0 0 5px var(--sp-ring-outer); }
+.sp-thumb { display: block; width: 56px; height: 56px; border-radius: 6px; }
+.sp-thumb-numbers {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px;
+  padding: 4px;
+  box-sizing: border-box;
+  background: var(--sp-well);
+}
+.sp-thumb-numbers span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: var(--sp-tile);
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+}
+.sp-check { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 8px 0 0; }
+.sp-check input { width: 22px; height: 22px; margin: 0; accent-color: var(--sp-tile); }
+.sp-photo { margin: 4px 0 0; }
+.sp-file { position: relative; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+.sp-file-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.sp-file:focus-within { box-shadow: 0 0 0 2px var(--sp-ring-inner), 0 0 0 5px var(--sp-ring-outer); }
+.sp-note:empty { display: none; }
 @media (prefers-reduced-motion: reduce) {
   .sp-tile { transition: none; }
-  .sp-won, .sp-win { animation: none; }
+  .sp-won, .sp-win, .sp-corner { animation: none; }
 }
 `;
