@@ -1,53 +1,96 @@
 # Sliding Puzzle
 
-4×4 sliding puzzle (tiles 1–15 plus a blank). Pick a nickname profile, play, and the backend saves your
-active game in SQLite, so the same profile resumes in another browser. No authentication.
-Runs locally on Node + SQLite; designed to deploy to Cloudflare Workers + D1.
+A 4×4 sliding puzzle (tiles 1–15 plus a blank). Pick a nickname, play, and the backend saves your
+game, so the same nickname resumes it in another browser. There is no authentication.
+
+It runs locally on Node and SQLite and is built to deploy to Cloudflare Workers and D1.
+
+## Run it
+
+Needs Node 26 (see `.nvmrc`).
+
+```sh
+npm install     # also enables the git hooks
+npm run dev     # API on :8787, web on :5173
+```
 
 ## Commands
 
-| Command                                 | What it does                                                    |
-| --------------------------------------- | --------------------------------------------------------------- |
-| `npm install`                           | Installs deps and enables the git hooks (`.githooks/`)          |
-| `npm test`                              | lint + typecheck + unit tests + build. **Run before you push.** |
-| `npm run test:unit`                     | Node native test runner only. Scope: `node --test src/puzzle`   |
-| `npm run test:e2e`                      | Playwright end-to-end (chromium)                                |
-| `npm run dev`                           | API on :8787 and Vite on :5173                                  |
-| `npm run lint` / `typecheck` / `format` | ESLint / `tsc --noEmit` / Prettier                              |
+| Command            | What it does                                                                     |
+| ------------------ | -------------------------------------------------------------------------------- |
+| `npm run check`    | Format, lint, types, unit and property tests, gate tests, computed checks, build |
+| `npm run test:e2e` | Playwright against the real servers, on a phone and a desktop project            |
+| `npm run mutate`   | Mutation testing: changes the code and checks that a test notices                |
+| `npm run dev`      | API and web together; Ctrl-C stops both                                          |
+| `npm run format`   | Prettier                                                                         |
 
-Hooks: `pre-commit` checks staged files (prettier, eslint, tsc). `pre-push` runs `npm test` and `npm run test:e2e`.
-Please do not use `--no-verify`.
+Scoped tests: `node --import ./scripts/tsx-hooks.js --test src/puzzle`.
 
-## Layout
+## Architecture
+
+A modular monolith: one package, flat folders in `src/`, cut by what they do.
 
 ```
 src/
-  puzzle/   pure game logic (no imports outside the folder)
-  profile/  nickname profiles
-  game/     the active game per profile (uses puzzle, profile, db)
-  db/       Db port + node:sqlite driver + D1 driver + migrator
-  server/   composition root: wires module server.ts entries (node.ts, worker.ts)
-  web/      composition root: wires module client.tsx entries (React)
-migrations/ plain .sql, applied locally by our migrator and on D1 by wrangler
-e2e/        Playwright specs
+  db/        Db port, node:sqlite driver, Cloudflare D1 driver, migrator    foundation
+  profile/   nickname profiles                                              foundation
+  game/      generic game engine: saved game per profile, versions,         foundation
+             start / resume / move / reset. Knows no particular game.
+  puzzle/    the sliding puzzle: rules, shuffle, board view. A FEATURE.
+  server/    composition root: wires features into the Hono app (Node and Worker entries)
+  web/       composition root: wires features into the React shell
+  test-support/  literal board grids, the real in-memory database, small test fixtures
+migrations/  plain SQL, applied locally by our migrator and on D1 by wrangler
+e2e/         Playwright acceptance tests
+gates/       tests of the quality gates themselves
+scripts/     computed checks and the TSX loader
 ```
 
-## Boundaries (enforced by ESLint, tested in `src/boundaries.test.ts`)
+### The deletion test
 
-A module exposes only `index.ts` (isomorphic: types, zod schemas, pure logic), `server.ts` (Hono routes/service) and
-`client.tsx` (React + API client). Everything else in the folder is private.
+A feature is a good module if you can delete its folder, remove the lines that pin it, and the
+project still compiles. `scripts/check-deletion.js` does exactly that for every feature, on every
+run of `npm run check`.
 
-1. Import another module only through its `index.ts`, `server.ts` or `client.tsx`. Never deep-import.
-2. Server code never imports client code, and the reverse. Client code never imports `node:*`.
-3. Allowed module dependencies: `game` → `puzzle`, `profile`, `db`; `profile` → `db`; `puzzle` and `db` → nothing.
-4. `puzzle` is pure: relative imports inside its own folder only.
-5. Only `server/` and `web/` wire modules together. Modules never import them.
-6. Duplicating a few lines beats reaching into another module.
+- Foundations never import a feature. A feature plugs into the engine through a `GameDefinition`
+  (`start`, `apply`, `isFinished`, and zod schemas for its state, moves and options).
+- Only `src/server/features.ts` and `src/web/features.tsx` import features, and each such line
+  ends with `// pin: <folder>`.
 
-If a rule blocks you, change the design or ask. Do not weaken the rule to get green.
+### Adding a game
 
-## Conventions
+1. Create `src/<name>/` with a `definition.ts`, a `server.ts` exporting a `ServerFeature` and a
+   `client.tsx` exporting a `ClientFeature` (see `src/puzzle/`).
+2. Pin it in `src/server/features.ts` and `src/web/features.tsx`.
+3. `npm run check`. The deletion test now covers your folder too.
 
-TypeScript strict, no `any`, no `!`, no `console` in modules, no enums (Node strips types, it does not compile them).
-Relative imports include the extension (`./board.ts`). Validate every edge with zod (HTTP, DB rows, storage).
-Write the test first. Never edit a test only to make it pass. Keep JSX thin: logic goes in `.ts` files that can be unit-tested.
+### Module rules (enforced by lint, tested in `gates/boundaries.test.ts`)
+
+- Import another module only through its `index.ts`, `server.ts` or `client.tsx`.
+- Server code never imports client code, and the reverse.
+- `puzzle/rules.ts`, `shuffle.ts` and `rng.ts` are pure: no imports outside the folder.
+- Only `src/server` supplies randomness and time. Modules take them as required options.
+
+### Saved games
+
+The server is authoritative. The browser sends a move together with the version it was made on.
+If the stored game has moved on, the server answers `409 stale` with the current game and the
+browser adopts it. Signing in is one atomic "resume" call that returns the saved game or creates it.
+
+## Tests
+
+The standard is in `AGENTS.md` and is enforced by lint (`eslint.test-standard.js`), so a test that
+breaks it cannot be committed:
+
+- A test sits next to the file it covers and reads in ten seconds: one behaviour, Given / When / Then.
+- Expected values are written by hand. Boards are drawn with the `grid` tag.
+- No branching or loops in tests; many inputs means a fast-check property.
+- No fakes of our own modules: tests use the real in-memory SQLite, and the D1 driver is tested
+  against a real local D1.
+
+`npm run mutate` shows whether the tests can fail. `gates/hooks.test.ts` shows that the git hooks
+refuse a bad commit or push.
+
+## Working in this repo
+
+Read `AGENTS.md`. It is short, and it applies to people and coding agents alike.
