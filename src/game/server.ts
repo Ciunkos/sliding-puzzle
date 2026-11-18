@@ -1,7 +1,15 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { Db } from '../db/index.ts';
-import { applyMove, isSolved, shuffle, type Rng } from '../puzzle/index.ts';
+import {
+  applyMove,
+  isSolvable,
+  isSolved,
+  isValidBoard,
+  shuffle,
+  type Board,
+  type Rng,
+} from '../puzzle/index.ts';
 import { gameStateSchema, moveRequestSchema, type GameState } from './index.ts';
 
 export * from './index.ts';
@@ -21,6 +29,8 @@ export interface GameService {
   get(profileId: number): Promise<GameState | undefined>;
   /** Creates a new shuffled game, replacing any existing one. */
   start(profileId: number): Promise<GameState>;
+  /** Like start, but from a chosen board. Throws InvalidStartBoardError unless it is valid, solvable and not solved. */
+  startWith(profileId: number, board: readonly number[]): Promise<GameState>;
   move(profileId: number, tile: number): Promise<GameResult>;
   reset(profileId: number): Promise<GameResult>;
 }
@@ -28,6 +38,13 @@ export interface GameService {
 export interface GameServiceOptions {
   random?: Rng;
   now?: () => Date;
+}
+
+export class InvalidStartBoardError extends Error {
+  constructor() {
+    super('start board must be a valid, solvable, unsolved board');
+    this.name = 'InvalidStartBoardError';
+  }
 }
 
 const MAX_ATTEMPTS = 3;
@@ -112,26 +129,36 @@ export function createGameService(db: Db, options: GameServiceOptions = {}): Gam
     );
   }
 
+  async function startFrom(profileId: number, board: Board): Promise<GameState> {
+    // Version keeps growing across replacements, so a move that read the old game can never
+    // pass its compare-and-swap against the new one. RETURNING gives the stored version.
+    const rows = await db.all(
+      `INSERT INTO games (profile_id, board, initial, moves, solved, version, updated_at)
+         VALUES (?, ?, ?, 0, 0, 1, ?)
+         ON CONFLICT(profile_id) DO UPDATE SET
+           board = excluded.board, initial = excluded.initial, moves = 0, solved = 0,
+           version = games.version + 1, updated_at = excluded.updated_at
+         RETURNING version`,
+      [profileId, JSON.stringify(board), JSON.stringify(board), now().toISOString()],
+    );
+    const [row] = z.tuple([startedRow]).parse(rows);
+    return { board, initial: board, moves: 0, solved: false, version: row.version };
+  }
+
   return {
     async get(profileId) {
       return readGame(db, profileId);
     },
 
     async start(profileId) {
-      const board = shuffle(random);
-      // Version keeps growing across replacements, so a move that read the old game can never
-      // pass its compare-and-swap against the new one. RETURNING gives the stored version.
-      const rows = await db.all(
-        `INSERT INTO games (profile_id, board, initial, moves, solved, version, updated_at)
-         VALUES (?, ?, ?, 0, 0, 1, ?)
-         ON CONFLICT(profile_id) DO UPDATE SET
-           board = excluded.board, initial = excluded.initial, moves = 0, solved = 0,
-           version = games.version + 1, updated_at = excluded.updated_at
-         RETURNING version`,
-        [profileId, JSON.stringify(board), JSON.stringify(board), now().toISOString()],
-      );
-      const [row] = z.tuple([startedRow]).parse(rows);
-      return { board, initial: board, moves: 0, solved: false, version: row.version };
+      return startFrom(profileId, shuffle(random));
+    },
+
+    async startWith(profileId, board) {
+      if (!isValidBoard(board) || !isSolvable(board) || isSolved(board)) {
+        throw new InvalidStartBoardError();
+      }
+      return startFrom(profileId, board);
     },
 
     async move(profileId, tile) {

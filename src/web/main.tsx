@@ -1,4 +1,12 @@
+import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { App } from './app.tsx';
 
 const root = document.getElementById('root');
-if (root) createRoot(root).render(<h1>Sliding Puzzle</h1>);
+if (root) {
+  createRoot(root).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+}
