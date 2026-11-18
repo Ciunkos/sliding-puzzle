@@ -1,0 +1,14 @@
+#!/bin/sh
+# Fast checks on what you are committing. Bypassing with --no-verify is discouraged.
+set -e
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+code=$(echo "$staged" | grep -E '\.(ts|tsx|js)$' || true)
+echo "pre-commit: prettier"
+echo "$staged" | grep -E '\.(ts|tsx|js|json|md|html)$' | xargs -r npx prettier --check
+if [ -n "$code" ]; then
+  echo "pre-commit: eslint"
+  echo "$code" | xargs npx eslint
+  echo "pre-commit: typecheck"
+  npx tsc --noEmit
+fi
