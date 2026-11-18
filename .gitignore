@@ -8,3 +8,6 @@ test-results
 .env*
 .e2e
 data
+.stryker-tmp
+reports
+.wrangler
