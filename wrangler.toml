@@ -26,5 +26,5 @@ binding = "DB"
 database_name = "sliding-puzzle"
 # Paste the id printed by `wrangler d1 create sliding-puzzle` here (see DEPLOY.md). Local runs
 # (`wrangler dev`, `--local` migrations) work with this placeholder.
-database_id = "REPLACE_WITH_REAL_ID"
+database_id = "c1e78e90-6bf4-45a3-994f-8aee30141e21"
 migrations_dir = "migrations"
