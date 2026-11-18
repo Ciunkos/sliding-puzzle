@@ -10,7 +10,10 @@ export default defineConfig({
   workers: 1,
   reporter: [['list']],
   use: { baseURL: `http://localhost:${String(WEB_PORT)}`, trace: 'retain-on-failure' },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'phone', use: { ...devices['Pixel 7'] } },
+    { name: 'desktop', use: { ...devices['Desktop Chrome'] } },
+  ],
   webServer: [
     {
       command: `rm -f .e2e/e2e.db* && PORT=${String(API_PORT)} DB_PATH=.e2e/e2e.db ENABLE_TEST_ROUTES=1 node src/server/node.ts`,
