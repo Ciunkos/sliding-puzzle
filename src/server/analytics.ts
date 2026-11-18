@@ -1,0 +1,109 @@
+// Usage statistics, server side: the config the page reads, and a same-origin proxy to PostHog, so
+// the page never talks to a third party. Runtime-agnostic (no node: imports): node.ts and worker.ts
+// both answer `analytics-config` and `ph/*` through `analyticsResponse`, so they answer the same.
+// The project token is a Worker secret; without it analytics is off and the proxy forwards nothing.
+// No rate limit binding and no paid service: the body cap and the path allowlist are the limits.
+import { z } from 'zod';
+import type { PathKind } from './paths.ts';
+
+/** PostHog's EU ingest host, used unless POSTHOG_HOST names another one. */
+export const DEFAULT_POSTHOG_HOST = 'https://eu.i.posthog.com';
+/** The largest event body forwarded, in bytes. */
+export const MAX_EVENT_BYTES = 65_536;
+/** The ingest paths the PostHog SDK posts to; everything else under ph/ is not found. */
+const INGEST_PATH = /^\/(e|i\/v0(?:\/e)?|batch|capture)\/?$/;
+const hostSchema = z.string().regex(/^https:\/\/[a-z0-9.-]+$/);
+const NO_STORE = { 'Cache-Control': 'no-store' };
+
+export type AnalyticsPath = Extract<PathKind, { kind: 'analytics-config' | 'analytics-proxy' }>;
+
+export interface AnalyticsSettings {
+  /** The PostHog project token, or undefined for analytics off. */
+  token: string | undefined;
+  /** The PostHog ingest host; DEFAULT_POSTHOG_HOST when undefined or not an https origin. */
+  host: string | undefined;
+  /** The outside world: the global fetch in production. */
+  fetch: (url: string, init: RequestInit) => Promise<Response>;
+}
+
+/** `{ enabled: false }` without a token, else the token the SDK needs. Never cached. */
+export function analyticsConfig(token: string | undefined): Response {
+  const body = token === undefined || token === '' ? { enabled: false } : { enabled: true, token };
+  return Response.json(body, { headers: NO_STORE });
+}
+
+const status = (code: number) => new Response(null, { status: code, headers: NO_STORE });
+
+/** The request body, or undefined once it grows past `max` bytes (a declared length is not trusted). */
+async function boundedBody(
+  request: Request,
+  max: number,
+): Promise<Uint8Array<ArrayBuffer> | undefined> {
+  if (request.body === null) return new Uint8Array();
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel();
+      return undefined;
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}
+
+/** Why a proxy request is refused before its body is read, or undefined when it may go on. */
+function refusal(request: Request, rest: string, token: string | undefined): number | undefined {
+  if (token === undefined || token === '') return 404;
+  if (request.method !== 'POST' || !INGEST_PATH.test(rest)) return 404;
+  if (request.headers.get('Origin') !== new URL(request.url).origin) return 403;
+  if (Number(request.headers.get('Content-Length') ?? 0) > MAX_EVENT_BYTES) return 413;
+  return undefined;
+}
+
+/**
+ * Forwards one event batch: the body and its content type only. Cookies, the client's address and
+ * every other header stay here; the answer comes back with its status and content type only.
+ */
+async function proxy(request: Request, rest: string, settings: AnalyticsSettings) {
+  const refused = refusal(request, rest, settings.token);
+  if (refused !== undefined) return status(refused);
+  const body = await boundedBody(request, MAX_EVENT_BYTES);
+  if (body === undefined) return status(413);
+  const parsed = hostSchema.safeParse(settings.host);
+  const host = parsed.success ? parsed.data : DEFAULT_POSTHOG_HOST;
+  const contentType = request.headers.get('Content-Type') ?? 'application/json';
+  try {
+    const upstream = await settings.fetch(`${host}${rest}${new URL(request.url).search}`, {
+      method: 'POST',
+      body,
+      headers: { 'Content-Type': contentType },
+    });
+    const headers = new Headers(NO_STORE);
+    const answerType = upstream.headers.get('Content-Type');
+    if (answerType !== null) headers.set('Content-Type', answerType);
+    return new Response(upstream.body, { status: upstream.status, headers });
+  } catch {
+    return status(502);
+  }
+}
+
+export function analyticsResponse(
+  request: Request,
+  path: AnalyticsPath,
+  settings: AnalyticsSettings,
+): Promise<Response> {
+  if (path.kind === 'analytics-proxy') return proxy(request, path.rest, settings);
+  if (request.method !== 'GET' && request.method !== 'HEAD') return Promise.resolve(status(405));
+  return Promise.resolve(analyticsConfig(settings.token));
+}

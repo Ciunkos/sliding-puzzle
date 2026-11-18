@@ -11,3 +11,4 @@ data
 .stryker-tmp
 reports
 .wrangler
+verify-out

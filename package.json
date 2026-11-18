@@ -25,7 +25,10 @@
     "format:check": "prettier --check .",
     "worker:dev": "wrangler dev",
     "worker:check": "wrangler deploy --dry-run --outdir dist/worker",
-    "lighthouse": "node scripts/lighthouse.js"
+    "lighthouse": "node scripts/lighthouse.js",
+    "verify": "node scripts/verify.js",
+    "predeploy": "npm run check && npm run test:e2e && npm run worker:check && wrangler d1 migrations apply sliding-puzzle --remote",
+    "deploy": "wrangler deploy && sh tests/prod.sh"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.9",

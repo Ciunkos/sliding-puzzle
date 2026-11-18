@@ -79,6 +79,26 @@ describe('createApp', () => {
     assert.deepEqual(await res.json(), { error: 'internal error' });
   });
 
+  test('an internal error is handed to the server log with its message', async () => {
+    // Given an app over a database whose tables are missing, with a log that keeps what it gets
+    const logged: unknown[] = [];
+    const app = createApp({
+      basePath: '/sliding-puzzle',
+      db: openEmptyDb(),
+      features,
+      random: scriptedRng([]),
+      now: fixedNow,
+      logError: (error) => logged.push(error),
+    });
+
+    // When a request reaches the database
+    await post(app, '/sliding-puzzle/api/profiles', '{"nickname":"Ada"}');
+
+    // Then the server log got the one error, with the message the client never sees
+    assert.equal(logged.length, 1);
+    assert.match(String(logged[0]), /no such table: profiles/);
+  });
+
   test('the test routes are absent by default', async () => {
     const app = await openApp(false);
     await post(app, '/sliding-puzzle/api/profiles', '{"nickname":"Ada"}');

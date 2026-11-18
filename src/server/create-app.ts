@@ -14,6 +14,11 @@ export interface AppOptions {
   now: () => Date;
   /** Mounts test-only routes. Never enable this in a deployed build. */
   enableTestRoutes?: boolean;
+  /**
+   * Where an unexpected error goes, server side only: the entry files pass the console. The client
+   * never sees it. Without it the error is not kept anywhere.
+   */
+  logError?: (error: unknown, request: { method: string; path: string }) => void;
 }
 
 export function createApp(options: AppOptions): Hono {
@@ -40,7 +45,8 @@ export function createApp(options: AppOptions): Hono {
   // Every route is mounted under the base path, e.g. /sliding-puzzle/api/health.
   const app = new Hono();
   app.route(options.basePath, api);
-  app.onError((_error, c) => {
+  app.onError((error, c) => {
+    options.logError?.(error, { method: c.req.method, path: c.req.path });
     // Never expose the message or stack to the client.
     return c.json({ error: 'internal error' }, 500);
   });

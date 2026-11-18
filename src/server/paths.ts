@@ -7,6 +7,8 @@ export const BASE = '/sliding-puzzle';
 export type PathKind =
   | { kind: 'redirect'; to: string }
   | { kind: 'api' }
+  | { kind: 'analytics-config' }
+  | { kind: 'analytics-proxy'; rest: string }
   | { kind: 'shell' }
   | { kind: 'asset' }
   | { kind: 'outside' };
@@ -16,9 +18,24 @@ const CLIENT_ROUTE = /^\/p\/[^/]+$/;
 /** A client route with a trailing slash: /p/<name>/. */
 const SLASHED_CLIENT_ROUTE = /^\/p\/[^/]+\/$/;
 
+/** The analytics config (its JSON) and the same-origin proxy to the analytics service. */
+export const ANALYTICS_CONFIG = '/analytics-config';
+export const ANALYTICS_PROXY = '/ph';
+
+/** A path the server answers itself (never a file), or undefined. */
+function serverRoute(rest: string): PathKind | undefined {
+  if (rest === '/api' || rest.startsWith('/api/')) return { kind: 'api' };
+  if (rest === ANALYTICS_CONFIG) return { kind: 'analytics-config' };
+  if (rest === ANALYTICS_PROXY || rest.startsWith(`${ANALYTICS_PROXY}/`)) {
+    return { kind: 'analytics-proxy', rest: rest.slice(ANALYTICS_PROXY.length) };
+  }
+  return undefined;
+}
+
 /** The part after the base path, which starts with a slash. */
 function classifyRest(rest: string, pathname: string): PathKind {
-  if (rest === '/api' || rest.startsWith('/api/')) return { kind: 'api' };
+  const server = serverRoute(rest);
+  if (server !== undefined) return server;
   // A profile path without a name is not a page: send it home instead of a bare 404.
   if (rest === '/p' || rest === '/p/') return { kind: 'redirect', to: BASE };
   if (rest === '/' || SLASHED_CLIENT_ROUTE.test(rest)) {

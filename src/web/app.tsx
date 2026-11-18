@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { ProfileGate } from '../profile/client.tsx';
 import { features } from './features.tsx';
 import { UpdateNotice } from './update-notice.tsx';
+import { UsageToggle } from './usage-toggle.tsx';
 
 /** The installed game. One feature today; a game picker comes when there is a second one. */
 function GameScreen(props: { nickname: string; apiBase: string }): ReactElement {
@@ -23,12 +24,15 @@ export function App(props: {
   serviceWorkerUrl: string | undefined;
 }): ReactElement {
   return (
-    <main>
-      <h1>Sliding Puzzle</h1>
-      <ProfileGate apiBase={props.apiBase} base={props.base} random={props.random}>
-        {(nickname) => <GameScreen nickname={nickname} apiBase={props.apiBase} />}
-      </ProfileGate>
-      <UpdateNotice url={props.serviceWorkerUrl} />
-    </main>
+    <>
+      <main>
+        <h1>Sliding Puzzle</h1>
+        <ProfileGate apiBase={props.apiBase} base={props.base} random={props.random}>
+          {(nickname) => <GameScreen nickname={nickname} apiBase={props.apiBase} />}
+        </ProfileGate>
+        <UpdateNotice url={props.serviceWorkerUrl} />
+      </main>
+      <UsageToggle />
+    </>
   );
 }

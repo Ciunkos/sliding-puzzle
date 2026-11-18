@@ -124,8 +124,13 @@ export default defineConfig({
   // Prepare three.js when the dev server starts. Otherwise Vite bundles it on first use and
   // reloads the page, which lands in the middle of whatever a player or a test was doing.
   optimizeDeps: { include: ['three'] },
+  // Everything the server answers itself goes to the API server (see classify in paths.ts).
   server: {
-    proxy: { '/sliding-puzzle/api': process.env.API_URL ?? 'http://localhost:8787' },
+    proxy: Object.fromEntries(
+      ['/sliding-puzzle/api', '/sliding-puzzle/analytics-config', '/sliding-puzzle/ph'].map(
+        (path) => [path, process.env.API_URL ?? 'http://localhost:8787'],
+      ),
+    ),
   },
   build: {
     outDir: '../../dist/web/sliding-puzzle',

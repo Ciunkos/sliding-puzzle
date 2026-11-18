@@ -65,6 +65,25 @@ describe('classify', () => {
   test('a profile path with no name at all redirects to the home page', () => {
     assert.deepEqual(classify('/sliding-puzzle/p'), { kind: 'redirect', to: '/sliding-puzzle' });
   });
+
+  test('the analytics config path is the analytics config', () => {
+    assert.deepEqual(classify('/sliding-puzzle/analytics-config'), { kind: 'analytics-config' });
+  });
+
+  test('a path under ph is the analytics proxy with the rest of the path', () => {
+    assert.deepEqual(classify('/sliding-puzzle/ph/i/v0/e/'), {
+      kind: 'analytics-proxy',
+      rest: '/i/v0/e/',
+    });
+  });
+
+  test('the bare ph path is the analytics proxy with an empty rest', () => {
+    assert.deepEqual(classify('/sliding-puzzle/ph'), { kind: 'analytics-proxy', rest: '' });
+  });
+
+  test('a name that only starts with ph is an asset path', () => {
+    assert.deepEqual(classify('/sliding-puzzle/phone.png'), { kind: 'asset' });
+  });
 });
 
 describe('pathHeaders', () => {

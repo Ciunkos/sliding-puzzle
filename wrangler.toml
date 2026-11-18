@@ -7,14 +7,24 @@ routes = [
   { pattern = "www.ciunkos.com/sliding-puzzle*", zone_name = "ciunkos.com" },
 ]
 
+# Secrets (never in this file): POSTHOG_PROJECT_TOKEN, set with `wrangler secret put`.
+# Optional var POSTHOG_HOST overrides the EU ingest host.
+
 [assets]
 directory = "dist/web"
 binding = "ASSETS"
 html_handling = "drop-trailing-slash"
-run_worker_first = ["/sliding-puzzle/", "/sliding-puzzle/api/*"]
+run_worker_first = [
+  "/sliding-puzzle/",
+  "/sliding-puzzle/api/*",
+  "/sliding-puzzle/analytics-config",
+  "/sliding-puzzle/ph/*",
+]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "sliding-puzzle"
+# Paste the id printed by `wrangler d1 create sliding-puzzle` here (see DEPLOY.md). Local runs
+# (`wrangler dev`, `--local` migrations) work with this placeholder.
 database_id = "REPLACE_WITH_REAL_ID"
 migrations_dir = "migrations"

@@ -15,6 +15,17 @@ function recordingAssets(urls: string[]) {
   };
 }
 
+/** The static-assets binding as Cloudflare answers a missing hashed file: 404, with the _headers rule. */
+const missingImmutableAsset = {
+  fetch: () =>
+    Promise.resolve(
+      new Response('Not Found', {
+        status: 404,
+        headers: { 'Cache-Control': 'public, max-age=31536000, immutable' },
+      }),
+    ),
+};
+
 describe('worker', () => {
   test('the worker answers the health check over a real D1 binding', async () => {
     // Given the worker with a local D1 database
@@ -85,5 +96,20 @@ describe('worker', () => {
 
     assert.equal(res.status, 405);
     assert.deepEqual(urls, []);
+  });
+
+  test('a missing hashed file is 404 and never kept, whatever the assets headers say', async () => {
+    // Given assets that answer a missing file with the year-long rule of _headers
+    const env = { DB: await openTestD1Binding(), ASSETS: missingImmutableAsset };
+
+    // When a hashed file that is not there is requested
+    const res = await worker.fetch(
+      new Request('https://example.test/sliding-puzzle/assets/gone-abc123.js'),
+      env,
+    );
+
+    // Then it is not found, and nobody may keep that answer
+    assert.equal(res.status, 404);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
   });
 });

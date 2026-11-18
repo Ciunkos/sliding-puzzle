@@ -9,6 +9,7 @@ import { Hono } from 'hono';
 import { compress } from 'hono/compress';
 import { z } from 'zod';
 import { createNodeSqliteDb, migrate } from '../db/server.ts';
+import { analyticsResponse, type AnalyticsSettings } from './analytics.ts';
 import { createApp } from './create-app.ts';
 import { features } from './features.ts';
 import { BASE, classify, pathHeaders } from './paths.ts';
@@ -21,6 +22,9 @@ const envSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(8787),
   DB_PATH: z.string().min(1).default('data/puzzle.db'),
   ENABLE_TEST_ROUTES: z.string().optional(),
+  // Usage statistics are off unless a token is set; locally only to try the proxy against a stand-in.
+  POSTHOG_PROJECT_TOKEN: z.string().min(1).optional(),
+  POSTHOG_HOST: z.string().optional(),
 });
 
 /**
@@ -52,7 +56,10 @@ function shellApp(): Hono {
 }
 
 /** Routes each request by its path, the same way the Worker does (see paths.ts). */
-function router(api: Hono): (request: Request) => Response | Promise<Response> {
+function router(
+  api: Hono,
+  analytics: AnalyticsSettings,
+): (request: Request) => Response | Promise<Response> {
   const web = webApp();
   const shell = shellApp();
   return (request) => {
@@ -62,12 +69,20 @@ function router(api: Hono): (request: Request) => Response | Promise<Response> {
       return new Response(null, { status: 301, headers: { location: `${path.to}${url.search}` } });
     }
     if (path.kind === 'api') return api.fetch(request);
-    if (path.kind === 'outside') return new Response('Not Found', { status: 404 });
-    if (request.method !== 'GET' && request.method !== 'HEAD') {
-      return new Response(null, { status: 405, headers: { allow: 'GET, HEAD' } });
+    if (path.kind === 'analytics-config' || path.kind === 'analytics-proxy') {
+      return analyticsResponse(request, path, analytics);
     }
-    return (path.kind === 'shell' ? shell : web).fetch(request);
+    if (path.kind === 'outside') return new Response('Not Found', { status: 404 });
+    return fromFiles(request, path.kind === 'shell' ? shell : web);
   };
+}
+
+/** Files are read-only: anything but GET and HEAD is refused before reaching them. */
+function fromFiles(request: Request, files: Hono): Response | Promise<Response> {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return new Response(null, { status: 405, headers: { allow: 'GET, HEAD' } });
+  }
+  return files.fetch(request);
 }
 
 export async function start(): Promise<ServerType> {
@@ -86,8 +101,15 @@ export async function start(): Promise<ServerType> {
     random: Math.random,
     now: () => new Date(),
     enableTestRoutes: env.ENABLE_TEST_ROUTES === '1',
+    logError: (error, request) => {
+      console.error(`sliding-puzzle: ${request.method} ${request.path} failed:`, error);
+    },
   });
-  const fetch = router(api);
+  const fetch = router(api, {
+    token: env.POSTHOG_PROJECT_TOKEN,
+    host: env.POSTHOG_HOST,
+    fetch: globalThis.fetch,
+  });
 
   return serve({ fetch, port: env.PORT }, (info) => {
     console.log(`sliding-puzzle listening on http://localhost:${String(info.port)}`);

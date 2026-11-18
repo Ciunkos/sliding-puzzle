@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { startAnalytics } from './analytics.ts';
 import { App } from './app.tsx';
 
 // The only place that reads Vite's env: BASE_URL is the configured base, e.g. /sliding-puzzle/.
@@ -23,3 +24,12 @@ if (root) {
     </StrictMode>,
   );
 }
+
+// Usage statistics (ciunkos.com only, and only when the player allows it): the moments this page
+// itself knows. Nothing here waits for them, and a failure only means nothing is counted.
+void startAnalytics(BASE).then((analytics) => {
+  analytics.track({ name: 'page_view' });
+  window.addEventListener('appinstalled', () => {
+    analytics.track({ name: 'app_installed' });
+  });
+});

@@ -5,6 +5,10 @@ const API_PORT = 8788;
 const WEB_PORT = 5174;
 /** The built app (`npm run build`) on the Node server, for the `app` project. */
 const APP_PORT = 8794;
+/** The built app on `wrangler dev` (the Worker, local D1, no login), for the `worker` project. */
+const WORKER_PORT = 8797;
+/** The Worker's local D1 and other state: its own folder, never the `npm run worker:dev` one. */
+const WORKER_STATE = '.e2e/wrangler-state';
 
 export default defineConfig({
   testDir: 'e2e',
@@ -20,13 +24,27 @@ export default defineConfig({
     launchOptions: { channel: 'chromium' },
   },
   projects: [
-    { name: 'phone', testIgnore: 'app.spec.ts', use: { ...devices['Pixel 7'] } },
-    { name: 'desktop', testIgnore: 'app.spec.ts', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'phone',
+      testIgnore: ['app.spec.ts', 'worker.spec.ts'],
+      use: { ...devices['Pixel 7'] },
+    },
+    {
+      name: 'desktop',
+      testIgnore: ['app.spec.ts', 'worker.spec.ts'],
+      use: { ...devices['Desktop Chrome'] },
+    },
     // The installed app: the production build with its service worker, on the Node server.
     {
       name: 'app',
       testMatch: 'app.spec.ts',
       use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${String(APP_PORT)}` },
+    },
+    // The rehearsal of a deploy: the same build on the Worker runtime with D1, as Cloudflare runs it.
+    {
+      name: 'worker',
+      testMatch: 'worker.spec.ts',
+      use: { ...devices['Desktop Chrome'], baseURL: `http://localhost:${String(WORKER_PORT)}` },
     },
   ],
   webServer: [
@@ -43,6 +61,18 @@ export default defineConfig({
     {
       command: `npm run build && rm -f .e2e/app.db* && PORT=${String(APP_PORT)} DB_PATH=.e2e/app.db ENABLE_TEST_ROUTES=1 node src/server/node.ts`,
       url: `http://localhost:${String(APP_PORT)}/sliding-puzzle/api/health`,
+      reuseExistingServer: false,
+      timeout: 180_000,
+    },
+    {
+      // Every migration on an empty local D1, then the Worker. wrangler needs no login for this.
+      command: [
+        'npm run build',
+        `rm -rf ${WORKER_STATE}`,
+        `npx wrangler d1 migrations apply sliding-puzzle --local --persist-to ${WORKER_STATE}`,
+        `npx wrangler dev --port ${String(WORKER_PORT)} --persist-to ${WORKER_STATE} --show-interactive-dev-session=false`,
+      ].join(' && '),
+      url: `http://localhost:${String(WORKER_PORT)}/sliding-puzzle/api/health`,
       reuseExistingServer: false,
       timeout: 180_000,
     },

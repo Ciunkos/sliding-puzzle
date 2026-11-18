@@ -27,6 +27,15 @@ describe('swRoute', () => {
     assert.equal(swRoute({ ...NAVIGATE, pathname: '/sliding-puzzle/api/health' }), 'pass');
   });
 
+  test('the analytics config is never answered by the worker', () => {
+    assert.equal(swRoute({ ...FETCH, pathname: '/sliding-puzzle/analytics-config' }), 'pass');
+  });
+
+  test('the analytics proxy is never answered by the worker, whatever the method', () => {
+    assert.equal(swRoute({ ...FETCH, pathname: '/sliding-puzzle/ph/e/' }), 'pass');
+    assert.equal(swRoute({ ...FETCH, method: 'POST', pathname: '/sliding-puzzle/ph/e/' }), 'pass');
+  });
+
   test('a built file under assets is hashed', () => {
     assert.equal(
       swRoute({ ...FETCH, pathname: '/sliding-puzzle/assets/board-3d-a1b2c3.js' }),
