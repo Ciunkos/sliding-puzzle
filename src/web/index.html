@@ -37,6 +37,10 @@
         font-family: system-ui, sans-serif;
         margin: 2rem auto;
         max-width: 28rem;
+        /* At least a screen tall in every state (static page, loading profile, game, errors):
+           the footer after it starts below the first screen, so the game growing in never
+           pushes it off the screen (a layout shift). */
+        min-height: 100vh;
       }
       @media (prefers-color-scheme: dark) {
         body {

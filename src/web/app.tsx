@@ -24,6 +24,7 @@ function GameScreen(props: {
  * `serviceWorkerUrl` is the offline worker (undefined in development); `onEvent` hears what the
  * game screens report. The page's own styles and the
  * same `<main>` and `<h1>` are in index.html, so the page looks the same before this renders.
+ * `<main>` is at least a screen tall (index.html), so the footer is never on the first screen.
  */
 export function App(props: {
   apiBase: string;

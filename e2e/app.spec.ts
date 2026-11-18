@@ -5,6 +5,7 @@ import type { APIRequestContext, BrowserContext, Page } from '@playwright/test';
 import { board, currentNickname, gameMessage, moves, openProfile, tile } from './support/app.ts';
 import { AFTER_TILE_11, KNOWN_BOARD } from './support/boards.ts';
 import { expect, test } from './support/harness.ts';
+import { firstVisitLayoutShift } from './support/layout-shift.ts';
 import {
   controllerScript,
   fetchFromPage,
@@ -131,6 +132,13 @@ test('the api is always asked over the network, never from a cache', async ({ pa
   const first = await fetchFromPage(page, '/sliding-puzzle/api/health');
   const second = await fetchFromPage(page, '/sliding-puzzle/api/health');
   expect([first.fromServiceWorker(), second.fromServiceWorker()]).toEqual([false, false]);
+});
+
+test('a first visit on a slow phone moves nothing on screen while the game and the 3D board arrive', async ({
+  page,
+}) => {
+  // Lighthouse fails above 0.1; the page measured 0.10 when the footer was pushed off the screen.
+  expect(await firstVisitLayoutShift(page)).toBeLessThanOrEqual(0.02);
 });
 
 test('a new version is offered, and Reload switches to it', async ({ page }) => {
