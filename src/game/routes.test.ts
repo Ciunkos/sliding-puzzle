@@ -37,10 +37,10 @@ async function started(body: string): Promise<App> {
 }
 
 describe('the game routes', () => {
-  test('starting with an empty body is 201 with a game of the default options', async () => {
+  test('starting with a blank body is 201 with a game of the default options', async () => {
     const app = await setup();
 
-    const res = await post(app, ADA_GAME, '');
+    const res = await post(app, ADA_GAME, ' \n');
 
     assert.equal(res.status, 201);
     assert.deepEqual(await res.json(), {
@@ -226,10 +226,10 @@ describe('the game routes', () => {
     });
   });
 
-  test('a reset body without a base version is 400', async () => {
+  test('a reset body that is not JSON is 400', async () => {
     const app = await started('');
 
-    const res = await post(app, `${ADA_GAME}/reset`, '');
+    const res = await post(app, `${ADA_GAME}/reset`, '{baseVersion');
 
     assert.equal(res.status, 400);
     assert.deepEqual(await res.json(), { error: 'invalid reset request' });

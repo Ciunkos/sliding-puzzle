@@ -40,15 +40,16 @@ export async function runRequest<State>(
   target.inFlight.current = true;
   target.setBusy(true);
   target.setMessage(undefined);
-  try {
-    const game = await request();
-    if (isLive()) target.setGame(game);
-  } catch (failure: unknown) {
-    if (isLive()) showFailure(target, failure);
-  } finally {
-    if (isLive()) {
-      target.inFlight.current = false;
-      target.setBusy(false);
-    }
-  }
+  const settle = await request().then(
+    (game) => () => {
+      target.setGame(game);
+    },
+    (failure: unknown) => () => {
+      showFailure(target, failure);
+    },
+  );
+  if (!isLive()) return;
+  settle();
+  target.inFlight.current = false;
+  target.setBusy(false);
 }

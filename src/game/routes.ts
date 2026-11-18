@@ -53,8 +53,15 @@ function handlers<State, Move, Options>(
   service: GameService<State, Move, Options>,
 ) {
   const moveBody = z.object({ baseVersion, move: definition.moveSchema });
-  const readOptions = async (c: Context) => definition.optionsSchema.safeParse(await readBody(c));
   const invalid = (c: Context, error: string) => c.json({ error }, 400);
+  /** A handler that gets the game options from the body; invalid options are 400. */
+  const withOptions =
+    (run: (c: Context, profileId: number, options: Options) => Promise<Response>): ProfileHandler =>
+    async (c, profileId) => {
+      const options = definition.optionsSchema.safeParse(await readBody(c));
+      if (!options.success) return invalid(c, 'invalid game options');
+      return run(c, profileId, options.data);
+    };
 
   return {
     get: async (c, profileId) => {
@@ -62,18 +69,14 @@ function handlers<State, Move, Options>(
       return game === undefined ? c.json({ error: 'no active game' }, 404) : c.json(game, 200);
     },
     // Resume: the saved game (200), or a new one from the options when there is none (201).
-    resume: async (c, profileId) => {
-      const options = await readOptions(c);
-      if (!options.success) return invalid(c, 'invalid game options');
-      const { game, created } = await service.resume(profileId, options.data);
+    resume: withOptions(async (c, profileId, options) => {
+      const { game, created } = await service.resume(profileId, options);
       return c.json(game, created ? 201 : 200);
-    },
+    }),
     // New game, replacing any existing one.
-    start: async (c, profileId) => {
-      const options = await readOptions(c);
-      if (!options.success) return invalid(c, 'invalid game options');
-      return c.json(await service.start(profileId, options.data), 201);
-    },
+    start: withOptions(async (c, profileId, options) =>
+      c.json(await service.start(profileId, options), 201),
+    ),
     move: async (c, profileId) => {
       const body = moveBody.safeParse(await readBody(c));
       if (!body.success) return invalid(c, 'invalid move request');

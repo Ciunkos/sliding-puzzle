@@ -28,20 +28,23 @@ function recording(sent: unknown[]) {
 }
 
 describe('the game API client', () => {
-  test('resuming sends the options with PUT and returns the parsed game', async () => {
+  test('resuming sends the options with PUT, a new game with POST, and both return the game', async () => {
     // Given a server that records what it was sent
     const sent: unknown[] = [];
     const api = recording(sent);
 
-    // When Ana Lu resumes
-    const game = await api.resume('Ana Lu', { target: 5 });
+    // When Ana Lu resumes, then starts a new game
+    const resumed = await api.resume('Ana Lu', { target: 5 });
+    await api.start('Ana Lu', { target: 7 });
 
-    // Then the nickname is encoded, the body is the options, and the answer is the game
+    // Then the nickname is encoded, each body is the options, and the answer is the game
     assert.deepEqual(sent, [
       '/api/profiles/Ana%20Lu/games/tally',
       { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"target":5}' },
+      '/api/profiles/Ana%20Lu/games/tally',
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"target":7}' },
     ]);
-    assert.deepEqual(game, SAVED);
+    assert.deepEqual(resumed, SAVED);
   });
 
   test('a move and a reset send the version they were made on', async () => {

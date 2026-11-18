@@ -2,7 +2,14 @@
 import type { z } from 'zod';
 import type { Db } from '../db/index.ts';
 import { type GameDefinition, type SavedGame, savedGameSchema } from './index.ts';
-import { type GameKey, insertIfAbsent, readGame, saveIfVersion, upsertGame } from './store.ts';
+import {
+  type GameKey,
+  insertIfAbsent,
+  readExistingGame,
+  readGame,
+  saveIfVersion,
+  upsertGame,
+} from './store.ts';
 
 export type GameFailure = 'no-game' | 'illegal-move' | 'already-finished';
 
@@ -98,20 +105,11 @@ function keyOf(engine: Engine<unknown, unknown, unknown>, profileId: number): Ga
   return { profileId, gameId: engine.definition.id };
 }
 
-/** The stored game as a stale result, for a request made on another version. */
-async function stale<State>(
-  engine: Engine<State, unknown, unknown>,
-  key: GameKey,
-): Promise<GameResult<State>> {
-  const game = await readGame(engine.db, key, engine.schema);
-  return game === undefined
-    ? { ok: false, reason: 'no-game' }
-    : { ok: false, reason: 'stale', game };
-}
-
 /**
  * Read, check the caller's version, compute, compare-and-swap. No retry: a request made on another
- * version is stale, and the caller decides what to do with the current game.
+ * version is stale, and the caller decides what to do with the current game. When the swap loses to
+ * another writer, running again reads the newer game and answers stale: versions only grow, so the
+ * stored version can never be `baseVersion` again.
  */
 async function mutate<State>(
   engine: Engine<State, unknown, unknown>,
@@ -127,7 +125,10 @@ async function mutate<State>(
   const result = step(current, now);
   if (!result.ok) return result;
   if (await saveIfVersion(engine.db, key, baseVersion, result.game, now)) return result;
-  return stale(engine, key);
+  // Another writer got in between the read and the write: answer with what is stored now.
+  // One read, no retry and no recursion, so a request can never loop.
+  const latest = await readExistingGame(engine.db, key, engine.schema);
+  return { ok: false, reason: 'stale', game: latest };
 }
 
 /** A game that starts at `state` now: no moves, finished only if `state` already is. */
@@ -166,11 +167,8 @@ async function resumeFrom<State>(
 ): Promise<Resumed<State>> {
   const key = keyOf(engine, profileId);
   const created = await insertIfAbsent(engine.db, key, freshGame(engine, state));
-  const game = await readGame(engine.db, key, engine.schema);
-  if (game === undefined) {
-    throw new Error(`game "${key.gameId}" of profile ${String(profileId)} is missing after insert`);
-  }
-  return { game, created };
+  // The row exists now: this call inserted it, or it was there already (games are never deleted).
+  return { game: await readExistingGame(engine.db, key, engine.schema), created };
 }
 
 /** Whether `state` is a valid state of the game and an acceptable start (see startWith). */

@@ -27,12 +27,19 @@ export const tallyGame: GameDefinition<TallyState, TallyMove, TallyOptions> = {
   isFinished: (state) => state.count >= state.target,
 };
 
-/** The tally game as a server feature, with one test-only route that answers `{ mounted: true }`. */
+/**
+ * The tally game as a server feature. Its one test-only route starts the profile's game one add
+ * short of the target, through the service and profile lookup the engine hands to test routes.
+ */
 export const tallyFeature: ServerFeature<TallyState, TallyMove, TallyOptions> = {
   definition: tallyGame,
-  testRoutes() {
+  testRoutes({ service, profiles }) {
     const app = new Hono();
-    app.get('/api/test/tally', (c) => c.json({ mounted: true }));
+    app.post('/api/test/profiles/:nickname/tally/almost-done', async (c) => {
+      const profile = await profiles.find(c.req.param('nickname'));
+      if (profile === undefined) return c.json({ error: 'profile not found' }, 404);
+      return c.json(await service.startWith(profile.id, { count: 4, target: 5 }), 201);
+    });
     return app;
   },
 };

@@ -41,8 +41,9 @@ function failure<State>(
   body: unknown,
   schema: z.ZodType<SavedGame<State>>,
 ): GameApiError {
+  // The body alone identifies a stale answer: `{ error: 'stale', game }` (sent with 409).
   const stale = z.object({ error: z.literal('stale'), game: schema }).safeParse(body);
-  if (res.status === 409 && stale.success) return new StaleGameError(stale.data.game);
+  if (stale.success) return new StaleGameError(stale.data.game);
   const parsed = errorBody.safeParse(body);
   const message = parsed.success
     ? parsed.data.error

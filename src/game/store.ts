@@ -37,17 +37,30 @@ function parseRow<State>(raw: unknown, schema: z.ZodType<SavedGame<State>>): Sav
   });
 }
 
+function selectRow(db: Db, key: GameKey) {
+  return db.get(
+    `SELECT state, initial, moves, finished, version, started_at, finished_at
+       FROM games WHERE profile_id = ? AND game_id = ?`,
+    [key.profileId, key.gameId],
+  );
+}
+
 export async function readGame<State>(
   db: Db,
   key: GameKey,
   schema: z.ZodType<SavedGame<State>>,
 ): Promise<SavedGame<State> | undefined> {
-  const row = await db.get(
-    `SELECT state, initial, moves, finished, version, started_at, finished_at
-       FROM games WHERE profile_id = ? AND game_id = ?`,
-    [key.profileId, key.gameId],
-  );
+  const row = await selectRow(db, key);
   return row === undefined ? undefined : parseRow(row, schema);
+}
+
+/** A game that must exist; a missing row fails the row schema like any other bad row. */
+export async function readExistingGame<State>(
+  db: Db,
+  key: GameKey,
+  schema: z.ZodType<SavedGame<State>>,
+): Promise<SavedGame<State>> {
+  return parseRow(await selectRow(db, key), schema);
 }
 
 type FreshGame = Omit<SavedGame<unknown>, 'version'>;
