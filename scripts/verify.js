@@ -217,6 +217,18 @@ function steps(origin, browser) {
         await expect(moves(page)).toHaveText('Moves: 1');
       },
     ],
+    [
+      'the footer says what usage statistics count, and its switch answers',
+      'footer',
+      async ({ page }) => {
+        const usage = page.getByTestId('usage-toggle');
+        await usage.scrollIntoViewIfNeeded();
+        await expect(page.getByTestId('usage-statistics')).toContainText('never your nickname');
+        await expect(usage).toHaveText('Usage statistics: on');
+        await usage.tap();
+        await expect(usage).toHaveText('Usage statistics: off');
+      },
+    ],
   ];
 }
 

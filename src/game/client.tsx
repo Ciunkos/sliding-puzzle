@@ -8,10 +8,27 @@ export type { QueueStorage } from './queue-storage.ts';
 export { isNewPersonalBest } from './results.ts';
 export { useGameSession, type GameSession } from './use-game-session.ts';
 
+/**
+ * A moment a game's screen reports, e.g. a game solved. The engine knows no particular game: the
+ * name and the properties are the feature's own, and the composition root decides what, if
+ * anything, leaves the page.
+ */
+export interface FeatureEvent {
+  name: string;
+  properties: Readonly<Record<string, string | number | boolean>>;
+}
+
 /** What a game feature hands to the web composition root. */
 export interface ClientFeature {
   id: string;
   title: string;
-  /** `apiBase` is where the API is mounted, e.g. /sliding-puzzle/api. */
-  Screen: (props: { nickname: string; apiBase: string }) => ReactElement;
+  /**
+   * `apiBase` is where the API is mounted, e.g. /sliding-puzzle/api. `onEvent`, when given, hears
+   * the moments the screen reports.
+   */
+  Screen: (props: {
+    nickname: string;
+    apiBase: string;
+    onEvent?: (event: FeatureEvent) => void;
+  }) => ReactElement;
 }

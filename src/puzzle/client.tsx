@@ -39,6 +39,7 @@ import { shownSkin } from './preferences.ts';
 import { type Size, SIZES, sizeOf } from './rules.ts';
 import { css } from './styles.ts';
 import { useAnnouncement } from './use-announcement.ts';
+import { useGameEvents, useSkinEvents } from './use-feature-events.ts';
 import { type LookChoices, useLook } from './use-look.ts';
 import { useMedia } from './use-media.ts';
 import { useNow } from './use-now.ts';
@@ -452,7 +453,10 @@ function Look(props: { choices: LookChoices; screen: ScreenLook }): ReactElement
   );
 }
 
-function PuzzleScreen(props: { nickname: string; apiBase: string }): ReactElement {
+/** The screen's props, as the engine defines them for every game. */
+type ScreenProps = Parameters<ClientFeature['Screen']>[0];
+
+function PuzzleScreen(props: ScreenProps): ReactElement {
   // Memoised: the session restarts when its api changes.
   const api = useMemo(() => createGameApi(puzzleDefinition, props.apiBase), [props.apiBase]);
   // One object for the whole screen: the session restarts when the options' identity changes, and
@@ -464,10 +468,13 @@ function PuzzleScreen(props: { nickname: string; apiBase: string }): ReactElemen
   const saving = useSavingHint(session.syncing);
   const choices = useLook();
   const screen = useScreenLook(choices);
+  const requestedNewGame = useGameEvents(session.game, elapsed, props.onEvent);
+  useSkinEvents(choices.look.skin, props.onEvent);
   const current = session.game === undefined ? undefined : sizeOf(session.game.state.board);
   const startGame = (size: Size) => {
     if (session.busy) return;
     options.size = size;
+    requestedNewGame();
     session.start();
   };
   return (

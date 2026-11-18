@@ -2,6 +2,7 @@
 // is kept in this browser (analytics.ts); statistics are only ever sent from ciunkos.com.
 import { type ReactElement, useState } from 'react';
 import { optedOut, setOptedOut } from './analytics.ts';
+import { usageLabel } from './usage-preference.ts';
 
 const CSS = `
 .usage { font-family: system-ui, sans-serif; max-width: 28rem; margin: 0 auto 2rem; font-size: 0.875rem; }
@@ -30,11 +31,11 @@ export function UsageToggle(): ReactElement {
     <footer className="usage" data-testid="usage-statistics">
       <style>{CSS}</style>
       <p>
-        Counts visits, games started and solved, and skin changes, never your nickname, board or
-        photo.
+        Counts visits, installs, new games and solved games (board size, moves, time) and skin
+        changes, never your nickname, board or photo.
       </p>
       <button type="button" data-testid="usage-toggle" onClick={toggle}>
-        Usage statistics: {off ? 'off' : 'on'}
+        {usageLabel(off)}
       </button>
     </footer>
   );

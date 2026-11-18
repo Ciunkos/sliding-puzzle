@@ -4,48 +4,48 @@
 // cookies (localStorage persistence), no autocapture, no session recording, no extra scripts.
 // Modules do not know about this file: the composition root (main.tsx) sends the events.
 import { z } from 'zod';
+import type { FeatureEvent } from '../game/client.tsx';
 import { analyticsAllowed, scrubEvent } from './analytics-policy.ts';
 import { POSTHOG_SDK } from './posthog-sdk.ts';
+import { readOptedOut, writeOptedOut } from './usage-preference.ts';
 
-/** The events this app sends. Never a nickname, a profile path, a photo or a board. */
-export type AnalyticsEvent =
-  | { name: 'page_view' }
-  | { name: 'game_started'; size: number }
-  | { name: 'game_solved'; size: number; moves: number; seconds: number }
-  | { name: 'skin_changed'; kind: 'numbers' | 'picture' | 'photo' }
-  | { name: 'app_installed' };
+/**
+ * An event this app sends: the page's own (`page_view`, `app_installed`) and a game screen's,
+ * after the allowlist in feature-events.ts. Never a nickname, a profile path, a photo or a board.
+ */
+export type AnalyticsEvent = FeatureEvent;
 
 export interface Analytics {
   track: (event: AnalyticsEvent) => void;
 }
 
-const OFF: Analytics = { track: () => undefined };
-
-/** The player's choice in the footer, kept in this browser. */
-const OPT_OUT_KEY = 'sliding-puzzle:usage-statistics';
-const optOutSchema = z.literal('off');
+export const ANALYTICS_OFF: Analytics = { track: () => undefined };
 
 const configSchema = z.discriminatedUnion('enabled', [
   z.object({ enabled: z.literal(false) }),
   z.object({ enabled: z.literal(true), token: z.string().min(1) }),
 ]);
 
-/** True when the player switched usage statistics off; storage that cannot be read counts as off. */
+/** The browser's localStorage; reading it may throw (blocked storage), which counts as off. */
+function browserStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> {
+  return globalThis.localStorage;
+}
+
+/** True when the player switched usage statistics off in this browser. */
 export function optedOut(): boolean {
   try {
-    return optOutSchema.safeParse(globalThis.localStorage.getItem(OPT_OUT_KEY)).success;
+    return readOptedOut(browserStorage());
   } catch {
     return true;
   }
 }
 
-/** Remembers the player's choice. A browser that blocks storage keeps statistics off anyway. */
+/** Remembers the player's choice. */
 export function setOptedOut(off: boolean): void {
   try {
-    if (off) globalThis.localStorage.setItem(OPT_OUT_KEY, 'off');
-    else globalThis.localStorage.removeItem(OPT_OUT_KEY);
+    writeOptedOut(browserStorage(), off);
   } catch {
-    // Nothing to keep it in: optedOut() already answers true.
+    // No storage at all: optedOut() already answers true.
   }
 }
 
@@ -105,8 +105,7 @@ function loadSdk(token: string, base: string): void {
 function capture(event: AnalyticsEvent): void {
   if (optedOut()) return;
   const sdk = Reflect.get(window, 'posthog') as PostHogGlobal | undefined;
-  const { name, ...properties } = event;
-  sdk?.capture?.(name, properties);
+  sdk?.capture?.(event.name, { ...event.properties });
 }
 
 /**
@@ -114,14 +113,14 @@ function capture(event: AnalyticsEvent): void {
  * it may not, when the server has no token, or when anything on the way fails. Never throws.
  */
 export async function startAnalytics(base: string): Promise<Analytics> {
-  if (!allowedHere()) return OFF;
+  if (!allowedHere()) return ANALYTICS_OFF;
   try {
     const response = await fetch(`${base}analytics-config`, { cache: 'no-store' });
     const config = configSchema.parse(await response.json());
-    if (!config.enabled) return OFF;
+    if (!config.enabled) return ANALYTICS_OFF;
     loadSdk(config.token, base);
     return { track: capture };
   } catch {
-    return OFF;
+    return ANALYTICS_OFF;
   }
 }
