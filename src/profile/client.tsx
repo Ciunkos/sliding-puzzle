@@ -1,65 +1,74 @@
-// Client entry: the profile picker. Logic lives in api.ts, last-profile.ts, form.ts and
-// use-profile-form.ts; this stays presentational.
-import { type ReactElement, useId, useMemo } from 'react';
+// Client entry: identity without authentication. The profile is in the URL (<base>/p/<nickname>);
+// a first visit gets a generated nickname, a later one the last profile of this browser. Logic lives
+// in url.ts, generate.ts, last-profile.ts and the use-*.ts hooks; this stays presentational.
+import { type ReactElement, type ReactNode, useMemo, useState } from 'react';
 import { createProfileApi } from './api.ts';
-import type { Profile } from './index.ts';
-import { type ProfileForm, useProfileForm } from './use-profile-form.ts';
+import { InvalidProfile } from './invalid-profile.tsx';
+import { ProfileBar } from './profile-bar.tsx';
+import * as styles from './styles.ts';
+import { useProfileRoute } from './use-profile-route.ts';
+import { type ProfileState, useProfile } from './use-profile.ts';
 
-const styles = {
-  form: { display: 'flex', flexDirection: 'column', gap: '0.5rem', maxWidth: '20rem' },
-  input: { padding: '0.5rem', fontSize: '1rem' },
-  button: { padding: '0.5rem', fontSize: '1rem' },
-  error: { color: '#b00020', margin: 0 },
-} as const;
-
-function NicknameField({ form }: { form: ProfileForm }): ReactElement {
-  const inputId = useId();
+function ProfileContent(props: {
+  state: ProfileState;
+  retry: () => void;
+  children: (nickname: string) => ReactNode;
+}): ReactNode {
+  const { state } = props;
+  if (state.status === 'ready') return props.children(state.profile.nickname);
+  if (state.status === 'loading') return <p>Loading profile…</p>;
   return (
     <>
-      <label htmlFor={inputId}>Nickname</label>
-      <input
-        id={inputId}
-        data-testid="nickname-input"
-        style={styles.input}
-        type="text"
-        autoComplete="nickname"
-        value={form.value}
-        disabled={form.busy}
-        aria-invalid={form.error !== undefined}
-        onChange={(event) => {
-          form.setValue(event.target.value);
-        }}
-      />
+      <p role="alert" data-testid="profile-load-error" style={styles.error}>
+        {state.message}
+      </p>
+      <button type="button" style={styles.button} onClick={props.retry}>
+        Try again
+      </button>
     </>
   );
 }
 
-export function ProfilePicker(props: {
+/** Resolves the profile from the URL, then renders `children` with its canonical nickname. */
+export function ProfileGate(props: {
   /** Where the API is mounted, e.g. /sliding-puzzle/api. */
   apiBase: string;
-  onSelected: (profile: Profile) => void;
+  /** Where the app is mounted, e.g. /sliding-puzzle/ (Vite's BASE_URL). */
+  base: string;
+  /** The random source for generated nicknames; supplied by the composition root. */
+  random: () => number;
+  children: (nickname: string) => ReactNode;
 }): ReactElement {
   const api = useMemo(() => createProfileApi(props.apiBase), [props.apiBase]);
-  const form = useProfileForm(api, props.onSelected);
+  const { route, open, openRandom, canonicalise } = useProfileRoute(props.base, props.random);
+  const [focusBar, setFocusBar] = useState(false);
+  const nickname = route.kind === 'play' ? route.nickname : undefined;
+  const { state, retry } = useProfile(api, nickname, (profile) => {
+    // One profile, one URL: show the server's display casing.
+    if (profile.nickname !== nickname) canonicalise(profile.nickname);
+  });
+
+  if (route.kind === 'invalid') {
+    const onNewRandom = () => {
+      setFocusBar(true);
+      openRandom('replace');
+    };
+    return <InvalidProfile raw={route.raw} onNewRandom={onNewRandom} />;
+  }
   return (
-    <section>
-      <h2>Who is playing?</h2>
-      <form style={styles.form} onSubmit={form.submit} noValidate>
-        <NicknameField form={form} />
-        <button
-          type="submit"
-          data-testid="profile-submit"
-          style={styles.button}
-          disabled={form.busy}
-        >
-          Play
-        </button>
-        {form.error !== undefined ? (
-          <p role="alert" data-testid="profile-error" style={styles.error}>
-            {form.error}
-          </p>
-        ) : null}
-      </form>
-    </section>
+    <>
+      <ProfileBar
+        nickname={state.status === 'ready' ? state.profile.nickname : route.nickname}
+        shareUrl={new URL(route.path, window.location.origin).href}
+        focusOnMount={focusBar}
+        onOpen={open}
+        onRandom={() => {
+          openRandom('push');
+        }}
+      />
+      <ProfileContent state={state} retry={retry}>
+        {props.children}
+      </ProfileContent>
+    </>
   );
 }

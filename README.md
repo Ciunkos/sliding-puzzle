@@ -1,7 +1,24 @@
 # Sliding Puzzle
 
-A 4×4 sliding puzzle (tiles 1–15 plus a blank). Pick a nickname, play, and the backend saves your
-game, so the same nickname resumes it in another browser. There is no authentication.
+A 4×4 sliding puzzle (tiles 1–15 plus a blank). Open it and you are playing: the backend saves your
+game under a nickname, and the nickname is in the URL, so the link resumes it in any browser.
+There is no authentication.
+
+### Identity without authentication
+
+- A profile lives at `/sliding-puzzle/p/<nickname>`. Opening that URL plays as that profile and
+  creates it on first use (`POST /sliding-puzzle/api/profiles` is get-or-create). Sharing the link,
+  or editing the name in the address bar, is how you "log in"; anyone with the link can play.
+- A first visit to `/sliding-puzzle` generates a nickname such as `tortoise-squirrel-123` (two words
+  from `src/profile/words.ts` and a number 100-999) and replaces the URL with its profile path.
+- The last profile is remembered in this browser (localStorage), so `/sliding-puzzle` later goes
+  straight back to it.
+- Nicknames are case-insensitive and the server keeps the first casing it saw. Once a profile loads,
+  the URL is replaced with that canonical casing, so one profile has one URL.
+- A name that breaks the rules (`src/profile/index.ts`), including malformed percent-encoding,
+  shows a "cannot be used" screen whose one action is a new random profile; nothing is created for it.
+- The pure parts (paths, the start decision, name generation) are in `src/profile/url.ts` and
+  `generate.ts`; the hooks only touch `history`, `location` and storage.
 
 It runs locally on Node and SQLite and is built to deploy to Cloudflare Workers and D1.
 

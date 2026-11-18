@@ -17,7 +17,7 @@ describe('validateNickname', () => {
   test('an invalid input gives not ok with the first rule message to show', () => {
     assert.deepEqual(validateNickname('A'), {
       ok: false,
-      message: 'nickname must be 2-20 characters',
+      message: 'nickname must be 2-30 characters',
     });
   });
 });

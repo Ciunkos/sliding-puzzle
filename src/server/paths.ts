@@ -16,14 +16,19 @@ const CLIENT_ROUTE = /^\/p\/[^/]+$/;
 /** A client route with a trailing slash: /p/<name>/. */
 const SLASHED_CLIENT_ROUTE = /^\/p\/[^/]+\/$/;
 
-export function classify(pathname: string): PathKind {
-  if (pathname === BASE) return { kind: 'shell' };
-  if (!pathname.startsWith(`${BASE}/`)) return { kind: 'outside' };
-  const rest = pathname.slice(BASE.length);
+/** The part after the base path, which starts with a slash. */
+function classifyRest(rest: string, pathname: string): PathKind {
   if (rest === '/api' || rest.startsWith('/api/')) return { kind: 'api' };
+  // A profile path without a name is not a page: send it home instead of a bare 404.
+  if (rest === '/p' || rest === '/p/') return { kind: 'redirect', to: BASE };
   if (rest === '/' || SLASHED_CLIENT_ROUTE.test(rest)) {
     return { kind: 'redirect', to: pathname.slice(0, -1) };
   }
-  if (CLIENT_ROUTE.test(rest)) return { kind: 'shell' };
-  return { kind: 'asset' };
+  return CLIENT_ROUTE.test(rest) ? { kind: 'shell' } : { kind: 'asset' };
+}
+
+export function classify(pathname: string): PathKind {
+  if (pathname === BASE) return { kind: 'shell' };
+  if (!pathname.startsWith(`${BASE}/`)) return { kind: 'outside' };
+  return classifyRest(pathname.slice(BASE.length), pathname);
 }

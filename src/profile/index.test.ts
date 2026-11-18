@@ -3,14 +3,14 @@ import { describe, test } from 'node:test';
 import fc from 'fast-check';
 import { nicknameKey, nicknameSchema } from './index.ts';
 
-const LENGTH_MESSAGE = /nickname must be 2-20 characters/;
+const LENGTH_MESSAGE = /nickname must be 2-30 characters/;
 // ZodError messages are JSON, so the quoted "_" and "-" are escaped there: match the plain start.
 const CHARACTER_MESSAGE = /nickname may only contain letters, digits/;
 
 /** Strings of allowed and disallowed characters, so both accepted and rejected inputs come up. */
 const NICKNAME_LIKE = fc.string({
   unit: fc.constantFrom('a', 'Z', '7', '_', '-', ' ', '.', 'é'),
-  maxLength: 24,
+  maxLength: 34,
 });
 
 describe('nicknameSchema', () => {
@@ -24,12 +24,15 @@ describe('nicknameSchema', () => {
 
   test('the shortest and the longest allowed nicknames are accepted', () => {
     assert.equal(nicknameSchema.parse('ab'), 'ab');
-    assert.equal(nicknameSchema.parse('abcdefghijklmnopqrst'), 'abcdefghijklmnopqrst');
+    assert.equal(
+      nicknameSchema.parse('abcdefghijklmnopqrstuvwxyz0123'),
+      'abcdefghijklmnopqrstuvwxyz0123',
+    );
   });
 
-  test('one character or twenty-one characters are rejected with the length message', () => {
+  test('one character or thirty-one characters are rejected with the length message', () => {
     assert.throws(() => nicknameSchema.parse('a'), LENGTH_MESSAGE);
-    assert.throws(() => nicknameSchema.parse('abcdefghijklmnopqrstu'), LENGTH_MESSAGE);
+    assert.throws(() => nicknameSchema.parse('abcdefghijklmnopqrstuvwxyz01234'), LENGTH_MESSAGE);
   });
 
   test('length is counted after trimming, so whitespace does not make a nickname long enough', () => {
@@ -43,12 +46,12 @@ describe('nicknameSchema', () => {
     assert.throws(() => nicknameSchema.parse('zoé'), CHARACTER_MESSAGE);
   });
 
-  test('any accepted nickname is 2-20 allowed characters and parsing it again changes nothing', () => {
+  test('any accepted nickname is 2-30 allowed characters and parsing it again changes nothing', () => {
     fc.assert(
       fc.property(NICKNAME_LIKE, (input) => {
         fc.pre(nicknameSchema.safeParse(input).success);
         const accepted = nicknameSchema.parse(input);
-        assert.match(accepted, /^[A-Za-z0-9_-]{2,20}$/);
+        assert.match(accepted, /^[A-Za-z0-9_-]{2,30}$/);
         assert.equal(nicknameSchema.parse(accepted), accepted);
       }),
     );

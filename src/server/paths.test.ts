@@ -26,10 +26,6 @@ describe('classify', () => {
     });
   });
 
-  test('a profile route without a name is an asset path', () => {
-    assert.deepEqual(classify('/sliding-puzzle/p/'), { kind: 'asset' });
-  });
-
   test('a path below a profile route is an asset path', () => {
     assert.deepEqual(classify('/sliding-puzzle/p/Ada/games'), { kind: 'asset' });
   });
@@ -60,5 +56,13 @@ describe('classify', () => {
 
   test('the api at the site root is outside', () => {
     assert.deepEqual(classify('/api/health'), { kind: 'outside' });
+  });
+
+  test('a profile path with an empty name redirects to the home page', () => {
+    assert.deepEqual(classify('/sliding-puzzle/p/'), { kind: 'redirect', to: '/sliding-puzzle' });
+  });
+
+  test('a profile path with no name at all redirects to the home page', () => {
+    assert.deepEqual(classify('/sliding-puzzle/p'), { kind: 'redirect', to: '/sliding-puzzle' });
   });
 });
