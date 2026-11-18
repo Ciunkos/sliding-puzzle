@@ -5,11 +5,14 @@ import { tallyGame } from '../test-support/tally-game.ts';
 import {
   forgetQueues,
   loadClock,
+  loadConfirmed,
   loadQueues,
+  offlineConfirmed,
   offlineQueue,
   queuePrefix,
   resumeQueues,
   saveClock,
+  saveConfirmed,
   saveQueue,
 } from './queue-storage.ts';
 
@@ -206,6 +209,46 @@ describe('the stored queues without the server', () => {
     assert.ok(shown);
     assert.deepEqual(shown.state, { confirmed: V2, pending: [ONE, TWO], notice: 'offline' });
     assert.equal(shown.merged.length, 2);
+  });
+});
+
+describe('the last confirmed game', () => {
+  test('one confirmed game is kept per profile and game: the last one saved', () => {
+    const storage = memoryStorage({});
+
+    saveConfirmed('tally', 'Ada', V1, storage);
+    saveConfirmed('tally', 'ADA', V2, storage);
+
+    assert.deepEqual([storage.length, storage.key(0)], [1, 'game-confirmed:tally:ada']);
+    assert.deepEqual(loadConfirmed(tallyGame, 'Ada', storage), V2);
+  });
+
+  test('without stored queues, the confirmed game is shown offline with nothing pending', () => {
+    const storage = memoryStorage({ 'game-confirmed:tally:ada': JSON.stringify(V2) });
+
+    assert.deepEqual(offlineConfirmed(tallyGame, 'Ada', storage), {
+      state: { confirmed: V2, pending: [], notice: 'offline' },
+      merged: [],
+    });
+  });
+
+  test('without a stored confirmed game there is nothing to show', () => {
+    assert.equal(offlineConfirmed(tallyGame, 'Ada', memoryStorage({})), undefined);
+  });
+
+  test('a stored confirmed game that is not a game of this definition is ignored', () => {
+    const storage = memoryStorage({
+      'game-confirmed:tally:ada': JSON.stringify({ ...V1, state: { count: 'zero', target: 5 } }),
+    });
+
+    assert.equal(loadConfirmed(tallyGame, 'Ada', storage), undefined);
+  });
+
+  test('storage that throws gives no confirmed game and does not break a save', () => {
+    assert.equal(loadConfirmed(tallyGame, 'Ada', THROWING_STORAGE), undefined);
+    assert.doesNotThrow(() => {
+      saveConfirmed('tally', 'Ada', V1, THROWING_STORAGE);
+    });
   });
 });
 

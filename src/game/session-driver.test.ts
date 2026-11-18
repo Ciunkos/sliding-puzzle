@@ -97,6 +97,14 @@ async function tappedAcrossAnOfflineReload() {
   return { device, reloaded };
 }
 
+/** Ada's game to `target` loaded online with nothing waiting, then reloaded offline. */
+async function reloadedOffline(target: number) {
+  const { device, driver } = await loaded(target);
+  goOffline(device);
+  const reloaded = await reload(device, driver);
+  return { device, reloaded };
+}
+
 /** Ada's game to 50 after two tabs, offline, tapped 3 and 1 and were closed. Still offline. */
 async function closedOfflineTabs(): Promise<Device> {
   const { device, first, second } = await twoTabs(50);
@@ -790,6 +798,119 @@ describe('the session driver', () => {
 
     assert.partialDeepStrictEqual(driver.shown(), { message: COULD_NOT_SAVE });
     assert.deepEqual(device.world.delays, [1000]);
+  });
+
+  test('a reload while offline after everything was saved still shows the game', async () => {
+    // Given a game to 50 loaded online with nothing waiting, reloaded after the network went down
+    const { device, reloaded } = await reloadedOffline(50);
+
+    // When 2 is tapped, and the connection returns
+    const shown = reloaded.shown();
+    await reloaded.move(TWO);
+    goOnline(device);
+    await reloaded.online();
+
+    // Then the confirmed game was on screen, and the tap reached the server for every device
+    assert.partialDeepStrictEqual(shown, {
+      game: { state: { count: 0, target: 50 }, moves: 0, version: 1 },
+      message: NOTICES.offline,
+      busy: false,
+    });
+    assert.partialDeepStrictEqual(await device.stored(), {
+      state: { count: 2, target: 50 },
+      moves: 1,
+    });
+    assert.partialDeepStrictEqual(reloaded.shown(), { message: undefined, syncing: false });
+  });
+
+  test('a tap made offline on the confirmed game gives way to a game changed elsewhere', async () => {
+    // Given a game to 50 reloaded offline with nothing waiting, and 2 tapped there
+    const { device, reloaded } = await reloadedOffline(50);
+    await reloaded.move(TWO);
+
+    // When another device adds 3, then the connection returns
+    await device.app.request(ADA_MOVES, { method: 'POST', body: MOVE_ON_V1 });
+    goOnline(device);
+    await reloaded.online();
+
+    // Then the other device's game wins, and the player is told
+    assert.partialDeepStrictEqual(reloaded.shown(), {
+      game: { state: { count: 3, target: 50 }, moves: 1, version: 2 },
+      message: NOTICES['server-newer'],
+    });
+  });
+
+  test('the game confirmed on reconnecting replaces the older one shown offline', async () => {
+    // Given a game reloaded offline, then changed by another device, then the connection returns
+    const { device, reloaded: offline } = await reloadedOffline(50);
+    await device.app.request(ADA_MOVES, { method: 'POST', body: MOVE_ON_V1 });
+    goOnline(device);
+    await offline.online();
+
+    // When the page is reloaded offline again
+    goOffline(device);
+    const again = await reload(device, offline);
+
+    // Then the game the server confirmed last is shown
+    assert.partialDeepStrictEqual(again.shown(), {
+      game: { state: { count: 3, target: 50 }, version: 2 },
+    });
+  });
+
+  test('a new game is the game shown after a reload while offline', async () => {
+    const { device, driver } = await loaded(5);
+    await driver.move(TWO);
+    await driver.start();
+    goOffline(device);
+
+    const reloaded = await reload(device, driver);
+
+    assert.partialDeepStrictEqual(reloaded.shown(), { game: { moves: 0, version: 3 } });
+  });
+
+  test('a finished game reloaded offline is shown finished and takes no moves', async () => {
+    const { device, driver } = await loaded(2);
+    await driver.move(TWO);
+    goOffline(device);
+
+    const reloaded = await reload(device, driver);
+    await reloaded.move(ONE);
+
+    assert.partialDeepStrictEqual(reloaded.shown(), {
+      game: { state: { count: 2, target: 2 }, finished: true, moves: 1 },
+      syncing: false,
+    });
+    assert.deepEqual(device.queued(), []);
+  });
+
+  test('a queue shown offline does not replace the newer confirmed game kept for this profile', async () => {
+    // Given a closed tab's queue on version 1, and a game confirmed later on version 2
+    const { device, driver } = await loaded(50);
+    await driver.move(TWO);
+    device.world.storage.set(QUEUE_KEY, STORED_QUEUE);
+    goOffline(device);
+
+    // When the page is reloaded offline: the stored queue is shown
+    const reloaded = await reload(device, driver);
+
+    // Then the kept confirmed game is still version 2
+    assert.partialDeepStrictEqual(reloaded.shown(), { game: { version: 1 } });
+    const kept: unknown = JSON.parse(String(device.world.storage.get('game-confirmed:tally:ada')));
+    assert.partialDeepStrictEqual(kept, { moves: 1, version: 2 });
+  });
+
+  test('a tab that has not heard of a newer game does not replace the one kept for this profile', async () => {
+    // Given two tabs on version 1, and 2 tapped and saved in the first (version 2)
+    const { device, first, second } = await twoTabs(50);
+    await playAt(device, first, [1, TWO]);
+    goOffline(device);
+
+    // When 1 is tapped offline in the second tab, still on version 1
+    await playAt(device, second, [2, ONE]);
+
+    // Then the kept confirmed game is still version 2
+    const kept: unknown = JSON.parse(String(device.world.storage.get('game-confirmed:tally:ada')));
+    assert.partialDeepStrictEqual(kept, { moves: 1, version: 2 });
   });
 
   test('the play time of a tab hidden and shown again counts only while it is shown', async () => {

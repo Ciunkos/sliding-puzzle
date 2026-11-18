@@ -5,6 +5,8 @@
 // One record per queue, named after its own content: two tabs never write the same record unless
 // they hold the very same queue, so one tab can never overwrite the moves of another. A tab
 // replaces its own record as its queue changes; a tab that loads adopts the records it can.
+// Beside the queues, the last game the server confirmed is kept, so the game opens offline even
+// when nothing waits.
 import { z } from 'zod';
 import { nicknameKey } from '../profile/index.ts';
 import { type GameClock, type PlayClock } from './clock.ts';
@@ -200,6 +202,51 @@ export function offlineQueue<State, Move>(
   const version = newest.queue.confirmed.version;
   const { state, joined } = join(definition, newest.queue, others, version);
   return { state: { ...state, notice: 'offline' }, merged: [newest, ...joined] };
+}
+
+/**
+ * The last game the server confirmed to a tab of this profile, so a reload without the server shows
+ * it even when no move waits. One record per profile and game, unlike the queues: it holds no
+ * moves, only a copy of the server's game, so a tab that writes it over another's loses nothing.
+ * Tabs write it only with an answer they just got from the server.
+ */
+function confirmedKey(gameId: string, nickname: string): string {
+  return `game-confirmed:${gameId}:${nicknameKey(nickname)}`;
+}
+
+export function saveConfirmed<State>(
+  gameId: string,
+  nickname: string,
+  game: SavedGame<State>,
+  storage: QueueStorage,
+): void {
+  try {
+    storage.setItem(confirmedKey(gameId, nickname), JSON.stringify(game));
+  } catch {
+    // Storage is a convenience: a failed write must not break the game.
+  }
+}
+
+/** The stored confirmed game, or undefined when there is none or it is not a game of `definition`. */
+export function loadConfirmed<State, Move>(
+  definition: Definition<State, Move>,
+  nickname: string,
+  storage: QueueStorage,
+): SavedGame<State> | undefined {
+  const stored = readJson(storage, confirmedKey(definition.id, nickname));
+  const parsed = savedGameSchema(definition.stateSchema).safeParse(stored);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** What to show without the server when no queue is stored: the confirmed game, nothing pending. */
+export function offlineConfirmed<State, Move>(
+  definition: Definition<State, Move>,
+  nickname: string,
+  storage: QueueStorage,
+): { state: SyncState<State, Move>; merged: QueueRecord<State, Move>[] } | undefined {
+  const confirmed = loadConfirmed(definition, nickname, storage);
+  if (confirmed === undefined) return undefined;
+  return { state: { confirmed, pending: [], notice: 'offline' }, merged: [] };
 }
 
 const clockSchema = z.object({

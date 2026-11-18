@@ -3,8 +3,9 @@
 // results. Everything from the outside world (storage, network state, time, timers) is injected.
 //
 // The session is `connected` once its queue was reconciled with the server's game. Until then (a
-// load that could not reach the server) it shows the stored queue, takes taps, sends nothing, and
-// tries the load again with backoff, on `online` and when the tab is shown.
+// load that could not reach the server) it shows the stored queue, or else the last game the
+// server confirmed, takes taps, sends nothing, and tries the load again with backoff, on `online`
+// and when the tab is shown.
 import { type GameApi, GameApiError, StaleGameError } from './api.ts';
 import { adoptClock, elapsedMs, type GameClock, newClock, reloadedClock, tick } from './clock.ts';
 import type { BestResult, SavedGame } from './index.ts';
@@ -13,10 +14,12 @@ import {
   forgetQueues,
   loadClock,
   loadQueues,
+  offlineConfirmed,
   offlineQueue,
   type QueueStorage,
   resumeQueues,
   saveClock,
+  saveConfirmed,
   saveQueue,
 } from './queue-storage.ts';
 import { COULD_NOT_SAVE, errorMessage, NOTICES, settle } from './session.ts';
@@ -280,9 +283,15 @@ export class SessionDriver<State, Move, Options> {
     this.retryLater();
   }
 
-  /** The stored queue, shown until the server answers; without one, why there is no game. */
+  /**
+   * The stored queue, else the last confirmed game, shown until the server answers; without
+   * either, why there is no game.
+   */
   private showStored(failure: unknown): void {
-    const shown = offlineQueue(this.api.definition, this.loadRecords());
+    const { definition } = this.api;
+    const shown =
+      offlineQueue(definition, this.loadRecords()) ??
+      offlineConfirmed(definition, this.nickname, this.env.storage);
     if (shown === undefined) {
       this.message = errorMessage(failure);
       return;
@@ -376,12 +385,17 @@ export class SessionDriver<State, Move, Options> {
     if (this.sync !== undefined) this.save({ confirmed: this.sync.confirmed, pending: [] });
   }
 
-  /** Shows `sync` and keeps its queue in this tab's record. */
+  /**
+   * Shows `sync` and keeps its queue in this tab's record. A game the server just confirmed is kept
+   * as well; one restored from storage while not connected is not news, and is not written back.
+   */
   private save(sync: SyncState<State, Move>): void {
+    const confirmedNow = this.connected && sync.confirmed !== this.sync?.confirmed;
     this.sync = sync;
     const { definition } = this.api;
     const key = saveQueue(definition.id, this.nickname, sync, this.env.storage, this.ownKey);
     this.ownKey = key;
+    if (confirmedNow) saveConfirmed(definition.id, this.nickname, sync.confirmed, this.env.storage);
     this.emit();
   }
 
