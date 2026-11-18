@@ -1,0 +1,6 @@
+CREATE TABLE profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  nickname TEXT NOT NULL,
+  nickname_key TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);

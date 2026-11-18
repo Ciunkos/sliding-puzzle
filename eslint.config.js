@@ -70,6 +70,21 @@ const featureConfigs = FEATURES.flatMap((name) => {
         : [];
   return [
     { files: [`src/${name}/**/*.{ts,tsx}`], rules: restrict([...base, ...extra]) },
+    // Tests may use the native Node test runner even in pure modules.
+    ...(name === 'puzzle'
+      ? [
+          {
+            files: ['src/puzzle/**/*.test.ts'],
+            rules: restrict([
+              ...base,
+              group(
+                '^(?!\\./|node:test$|node:assert(/strict)?$)',
+                'puzzle tests: only relative imports, node:test and node:assert.',
+              ),
+            ]),
+          },
+        ]
+      : []),
     {
       files: [`src/${name}/server.ts`],
       rules: restrict([...base, ...extra, ...noClientFromServer]),

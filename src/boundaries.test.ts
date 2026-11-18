@@ -20,6 +20,8 @@ const cases: [string, string, boolean][] = [
   ['src/game/store.ts', "import '../profile/index.ts';", false],
   ['src/profile/store.ts', "import '../game/index.ts';", true], // not in allowlist
   ['src/puzzle/board.ts', "import { z } from 'zod'; export { z };", true], // puzzle is pure
+  ['src/puzzle/board.test.ts', "import 'node:test'; import 'node:assert/strict';", false], // tests may use the runner
+  ['src/puzzle/board.test.ts', "import 'zod';", true],
   ['src/db/driver.ts', "import '../game/index.ts';", true],
   ['src/game/server.ts', "import '../game/client.tsx';", true], // server <-> client
   ['src/game/client.tsx', "import 'node:fs';", true],
