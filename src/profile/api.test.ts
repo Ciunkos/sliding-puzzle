@@ -79,4 +79,25 @@ describe('createProfileApi', () => {
     await assert.rejects(failing.selectOrCreate('Ada'), GENERIC_ERROR);
     await assert.rejects(malformed.selectOrCreate('Ada'), GENERIC_ERROR);
   });
+
+  test('a request that never reached the server, or a 5xx, is marked unreachable', async () => {
+    const offline = createProfileApi('/sliding-puzzle/api', () =>
+      Promise.reject(new TypeError('fetch failed')),
+    );
+    const down = createProfileApi('/sliding-puzzle/api', answering(json({}, 503)));
+
+    await assert.rejects(offline.selectOrCreate('Ada'), { unreachable: true });
+    await assert.rejects(down.selectOrCreate('Ada'), { unreachable: true });
+  });
+
+  test('a refused name or an unusable answer is not marked unreachable', async () => {
+    const refused = createProfileApi('/sliding-puzzle/api', answering(json({ error: 'no' }, 400)));
+    const malformed = createProfileApi(
+      '/sliding-puzzle/api',
+      answering(json({ id: 'seven' }, 200)),
+    );
+
+    await assert.rejects(refused.selectOrCreate('Ada'), { unreachable: false });
+    await assert.rejects(malformed.selectOrCreate('Ada'), { unreachable: false });
+  });
 });

@@ -5,9 +5,13 @@ import { type Profile, profileSchema } from './index.ts';
 const GENERIC_MESSAGE = 'Could not reach the server';
 
 export class ProfileApiError extends Error {
-  constructor(message: string) {
+  /** The request did not reach a working server (no network, or a 5xx), as opposed to a refusal. */
+  readonly unreachable: boolean;
+
+  constructor(message: string, unreachable = false) {
     super(message);
     this.name = 'ProfileApiError';
+    this.unreachable = unreachable;
   }
 }
 
@@ -39,7 +43,7 @@ export function createProfileApi(
           body: JSON.stringify({ nickname }),
         });
       } catch {
-        throw new ProfileApiError(GENERIC_MESSAGE);
+        throw new ProfileApiError(GENERIC_MESSAGE, true);
       }
 
       const body = await readJson(res);
@@ -49,7 +53,7 @@ export function createProfileApi(
         throw new ProfileApiError(parsed.success ? parsed.data.error : GENERIC_MESSAGE);
       }
       if (!res.ok) {
-        throw new ProfileApiError(GENERIC_MESSAGE);
+        throw new ProfileApiError(GENERIC_MESSAGE, res.status >= 500);
       }
 
       const profile = profileSchema.safeParse(body);

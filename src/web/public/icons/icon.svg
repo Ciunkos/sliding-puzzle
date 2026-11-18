@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <title>Sliding Puzzle</title>
+  <rect width="512" height="512" rx="96" fill="#1d4ed8"/>
+  <g fill="#ffffff">
+    <rect x="76" y="76" width="108" height="108" rx="18"/>
+    <rect x="202" y="76" width="108" height="108" rx="18"/>
+    <rect x="328" y="76" width="108" height="108" rx="18"/>
+    <rect x="76" y="202" width="108" height="108" rx="18"/>
+    <rect x="202" y="202" width="108" height="108" rx="18"/>
+    <rect x="328" y="202" width="108" height="108" rx="18"/>
+    <rect x="76" y="328" width="108" height="108" rx="18"/>
+  </g>
+  <rect x="244" y="328" width="108" height="108" rx="18" fill="#fbbf24"/>
+  <path d="M376 382 l-22 -20 v40 z" fill="#fbbf24"/>
+</svg>

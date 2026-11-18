@@ -170,6 +170,22 @@ export default defineConfig(
       group('^\\.\\./(db|server)(/|$)', 'web must not import db or server.'),
     ]),
   },
+  {
+    // Tests in web may use the test runner, and nothing else from Node.
+    files: ['src/web/**/*.test.{ts,tsx}'],
+    rules: restrict([
+      group('(^|/)server(\\.ts)?$', 'Client code must not import server code.'),
+      group(
+        '^(node:(?!test$|assert(/strict)?$)|hono|@hono/)',
+        'Web tests may import node:test and node:assert only; no other Node or server libraries.',
+      ),
+      group(
+        '^\\.\\./(?!test-support/)[^/]+/(?!(index\\.ts|client\\.tsx)$)',
+        'Import only index.ts or client.tsx of a module.',
+      ),
+      group('^\\.\\./(db|server)(/|$)', 'web must not import db or server.'),
+    ]),
+  },
   { files: ['**/*.js'], extends: [tseslint.configs.disableTypeChecked] },
   {
     files: ['**/*.test.{ts,tsx}', 'src/test-support/**/*.contract.ts', 'e2e/**/*.ts'],

@@ -1,0 +1,24 @@
+{
+  "id": "/sliding-puzzle",
+  "name": "Sliding Puzzle",
+  "short_name": "Puzzle",
+  "description": "Slide the tiles into order, from 3×3 to 5×5. No sign-up: your game is saved under a nickname in the link, and it plays offline.",
+  "start_url": "/sliding-puzzle",
+  "scope": "/sliding-puzzle",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "categories": ["games"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { BASE, classify } from './paths.ts';
+import { BASE, classify, pathHeaders } from './paths.ts';
 
 describe('classify', () => {
   test('the base path is /sliding-puzzle', () => {
@@ -64,5 +64,24 @@ describe('classify', () => {
 
   test('a profile path with no name at all redirects to the home page', () => {
     assert.deepEqual(classify('/sliding-puzzle/p'), { kind: 'redirect', to: '/sliding-puzzle' });
+  });
+});
+
+describe('pathHeaders', () => {
+  test('the service worker may control the base without a slash and is never cached', () => {
+    assert.deepEqual(pathHeaders('/sliding-puzzle/sw.js'), {
+      'Cache-Control': 'no-store',
+      'Service-Worker-Allowed': '/sliding-puzzle',
+    });
+  });
+
+  test('a hashed build file may be kept for a year', () => {
+    assert.deepEqual(pathHeaders('/sliding-puzzle/assets/index-abc123.js'), {
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
+  });
+
+  test('any other path gets no extra headers', () => {
+    assert.deepEqual(pathHeaders('/sliding-puzzle/icons/icon.svg'), {});
   });
 });

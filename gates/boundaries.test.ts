@@ -40,6 +40,9 @@ const cases: [string, string, boolean][] = [
   ['src/server/create-app.ts', "import '../puzzle/server.ts';", false],
   ['src/server/create-app.test.ts', "import '../test-support/db.ts';", false], // root tests may use test-support
   ['src/web/app.test.tsx', "import '../test-support/db.ts';", false],
+  ['src/web/update.test.ts', "import 'node:test'; import 'node:assert/strict';", false], // web tests use the runner
+  ['src/web/update.test.ts', "import 'node:fs';", true],
+  ['src/web/update.ts', "import 'node:test';", true],
   ['src/game/store.ts', "import '../server/create-app.ts';", true], // modules never import roots
 ];
 

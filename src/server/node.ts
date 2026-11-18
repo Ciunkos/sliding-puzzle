@@ -6,11 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { serve, type ServerType } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import { compress } from 'hono/compress';
 import { z } from 'zod';
 import { createNodeSqliteDb, migrate } from '../db/server.ts';
 import { createApp } from './create-app.ts';
 import { features } from './features.ts';
-import { BASE, classify } from './paths.ts';
+import { BASE, classify, pathHeaders } from './paths.ts';
 
 const MIGRATIONS_DIR = fileURLToPath(new URL('../../migrations', import.meta.url));
 /** Relative to the working directory, where `npm run build` writes the web app. */
@@ -22,10 +23,21 @@ const envSchema = z.object({
   ENABLE_TEST_ROUTES: z.string().optional(),
 });
 
-/** Static files from dist/web, whose paths mirror the URL paths. Empty when the build is missing. */
+/**
+ * Static files from dist/web, whose paths mirror the URL paths, with the headers of their path
+ * (the same ones dist/web/_headers gives them on Cloudflare). Empty when the build is missing.
+ */
 function webApp(): Hono {
   const web = new Hono();
   if (!existsSync(WEB_DIR)) return web;
+  // Cloudflare compresses what it serves; this server does the same, so local measurements agree.
+  web.use('*', compress());
+  web.use('*', async (c, next) => {
+    await next();
+    // A missing file is not kept: only a file that was found gets its path's headers.
+    if (!c.res.ok) return;
+    for (const [name, value] of Object.entries(pathHeaders(c.req.path))) c.header(name, value);
+  });
   web.get('*', serveStatic({ root: WEB_DIR }));
   return web;
 }
@@ -34,6 +46,7 @@ function webApp(): Hono {
 function shellApp(): Hono {
   const shell = new Hono();
   if (!existsSync(WEB_DIR)) return shell;
+  shell.use('*', compress());
   shell.get('*', serveStatic({ root: WEB_DIR, path: `${BASE.slice(1)}/index.html` }));
   return shell;
 }

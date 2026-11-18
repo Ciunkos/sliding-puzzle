@@ -4,6 +4,7 @@
 import { type ReactElement, type ReactNode, useMemo, useState } from 'react';
 import { createProfileApi } from './api.ts';
 import { InvalidProfile } from './invalid-profile.tsx';
+import { OfflineUnavailable } from './offline-unavailable.tsx';
 import { ProfileBar } from './profile-bar.tsx';
 import * as styles from './styles.ts';
 import { useProfileRoute } from './use-profile-route.ts';
@@ -12,11 +13,15 @@ import { type ProfileState, useProfile } from './use-profile.ts';
 function ProfileContent(props: {
   state: ProfileState;
   retry: () => void;
+  onOpen: (nickname: string) => void;
   children: (nickname: string) => ReactNode;
 }): ReactNode {
   const { state } = props;
   if (state.status === 'ready') return props.children(state.profile.nickname);
   if (state.status === 'loading') return <p>Loading profile…</p>;
+  if (state.status === 'unavailable-offline') {
+    return <OfflineUnavailable other={state.other?.nickname} onOpen={props.onOpen} />;
+  }
   return (
     <>
       <p role="alert" data-testid="profile-load-error" className={styles.error}>
@@ -66,7 +71,7 @@ export function ProfileGate(props: {
           openRandom('push');
         }}
       />
-      <ProfileContent state={state} retry={retry}>
+      <ProfileContent state={state} retry={retry} onOpen={open}>
         {props.children}
       </ProfileContent>
     </>

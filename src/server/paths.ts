@@ -32,3 +32,23 @@ export function classify(pathname: string): PathKind {
   if (!pathname.startsWith(`${BASE}/`)) return { kind: 'outside' };
   return classifyRest(pathname.slice(BASE.length), pathname);
 }
+
+/** The service worker script. Its scope is BASE, without a trailing slash, which is above it. */
+export const SERVICE_WORKER_PATH = `${BASE}/sw.js`;
+
+/** Built files whose names carry a hash of their content, so they never change. */
+export const HASHED_ASSETS = `${BASE}/assets/`;
+
+/**
+ * Headers the app's files carry in every environment: the Node entry sets them, and the build writes
+ * them into dist/web/_headers for Cloudflare. Hashed files may be kept for a year. The service
+ * worker may control BASE itself only with Service-Worker-Allowed, and is never cached, so an update
+ * is seen at once.
+ */
+export function pathHeaders(pathname: string): Record<string, string> {
+  if (pathname.startsWith(HASHED_ASSETS)) {
+    return { 'Cache-Control': 'public, max-age=31536000, immutable' };
+  }
+  if (pathname !== SERVICE_WORKER_PATH) return {};
+  return { 'Cache-Control': 'no-store', 'Service-Worker-Allowed': BASE };
+}

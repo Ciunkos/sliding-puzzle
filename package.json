@@ -24,7 +24,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "worker:dev": "wrangler dev",
-    "worker:check": "wrangler deploy --dry-run --outdir dist/worker"
+    "worker:check": "wrangler deploy --dry-run --outdir dist/worker",
+    "lighthouse": "node scripts/lighthouse.js"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.9",

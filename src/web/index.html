@@ -2,14 +2,60 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Sliding Puzzle: slide the tiles into order</title>
+    <meta
+      name="description"
+      content="A free sliding tile puzzle from 3×3 to 5×5. Play at once, no sign-up: your game is saved under a nickname in the link, and it plays offline."
+    />
+    <link rel="canonical" href="https://ciunkos.com/sliding-puzzle" />
     <meta name="color-scheme" content="light dark" />
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0a0d14" media="(prefers-color-scheme: dark)" />
-    <title>Sliding Puzzle</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Puzzle" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://ciunkos.com/sliding-puzzle" />
+    <meta property="og:title" content="Sliding Puzzle" />
+    <meta
+      property="og:description"
+      content="Slide the tiles into order, from 3×3 to 5×5. No sign-up; your game is saved in the link."
+    />
+    <meta name="twitter:card" content="summary" />
+    <!-- The page's own styles, here so the first paint already has them (no flash, no shift). -->
+    <style>
+      body {
+        background: #fff;
+        color: #111;
+      }
+      main {
+        font-family: system-ui, sans-serif;
+        margin: 2rem auto;
+        max-width: 28rem;
+      }
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #0a0d14;
+          color: #e8ecf3;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- React replaces this with the same main and heading, so nothing moves when it starts. -->
+    <div id="root">
+      <main>
+        <h1>Sliding Puzzle</h1>
+        <noscript>
+          <p>Sliding Puzzle needs JavaScript. Turn it on in your browser to play.</p>
+        </noscript>
+      </main>
+    </div>
     <script type="module" src="/main.tsx"></script>
   </body>
 </html>
