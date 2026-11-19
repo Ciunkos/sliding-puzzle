@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import fc from 'fast-check';
-import { decideStart, nicknameFromPath, profilePath } from './url.ts';
+import { decideStart, keepQuery, nicknameFromPath, profilePath } from './url.ts';
 
 /** Vite's BASE_URL: the app's prefix with a trailing slash. */
 const BASE = '/sliding-puzzle/';
@@ -159,5 +159,21 @@ describe('decideStart', () => {
     });
 
     assert.deepEqual(decision, { kind: 'invalid', raw: 'a' });
+  });
+});
+
+describe('keepQuery', () => {
+  test('a new profile path keeps the query and the hash of the address it replaces', () => {
+    assert.equal(
+      keepQuery('/sliding-puzzle/p/brave-otter-100', { search: '?fps', hash: '#top' }),
+      '/sliding-puzzle/p/brave-otter-100?fps#top',
+    );
+  });
+
+  test('an address without either gives the path alone', () => {
+    assert.equal(
+      keepQuery('/sliding-puzzle/p/ada', { search: '', hash: '' }),
+      '/sliding-puzzle/p/ada',
+    );
   });
 });

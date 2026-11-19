@@ -1,6 +1,6 @@
-// What a key, a swipe or a tap asks the board to do. Plain functions; the event wiring is in
-// use-board-input.ts and only reads the event and calls these.
-import { type Board, legalMoves, sizeOf } from './rules.ts';
+// What a key, a swipe, a drag or a tap asks the board to do. Plain functions; the event wiring is
+// in use-board-input.ts and only reads the event and calls these. Times are passed in (ms).
+import { applyMove, type Board, isSolved, legalMoves, sizeOf } from './rules.ts';
 
 /**
  * Where a tile slides. Convention: a direction names where the TILE goes, so "left" (swiping or
@@ -102,4 +102,239 @@ export function tabStopTile(
   if (kept !== undefined) return kept;
   const [lowest] = finished ? [] : legalMoves(board);
   return lowest ?? 1;
+}
+
+/**
+ * The share of a cell a held tile travels before its move commits, with the finger still down.
+ * 0.3: on a 4x4 board on a phone (cells of about 90 px) that is about 27 px, the distance a swipe
+ * already needed (SWIPE_MIN_PX), so dragging feels no heavier than swiping did, and a finger that
+ * wobbles on a tap (TAP_SLOP_PX) never gets there.
+ */
+export const COMMIT_SHARE = 0.3;
+/** A flick: released moving towards the gap at least this fast (px per ms, i.e. 500 px/s)... */
+export const FLICK_PX_PER_MS = 0.5;
+/** ...after moving at least this far, and with the finger lifted within FLICK_WINDOW_MS of moving. */
+export const FLICK_MIN_PX = 8;
+const FLICK_WINDOW_MS = 80;
+/** A press that travels less than this, and moves nothing, is still a tap. */
+export const TAP_SLOP_PX = 10;
+
+/** Which way a direction points on screen, y growing downwards. */
+const UNIT: Record<Direction, { x: number; y: number }> = {
+  left: { x: -1, y: 0 },
+  right: { x: 1, y: 0 },
+  up: { x: 0, y: -1 },
+  down: { x: 0, y: 1 },
+};
+const DIRECTIONS: readonly Direction[] = ['up', 'down', 'left', 'right'];
+
+/** A pointer position in CSS pixels and when it was there, in ms. */
+export interface Point {
+  x: number;
+  y: number;
+  t: number;
+}
+
+/** A press on the board, from pointer down to up. */
+export interface Gesture {
+  /** The board as it is after this gesture's moves so far, and as it was before the last one. */
+  board: Board;
+  before: Board;
+  /** The tile held and the way it can go; undefined for a swipe (a press off any movable tile). */
+  held: { tile: number; direction: Direction } | undefined;
+  /** Where the pointer was when the gesture started, or last committed a move. */
+  anchor: Point;
+  /** The last move, and the moves of the last TRAIL_MS (with the press), for a flick's speed. */
+  last: Point;
+  trail: readonly Point[];
+  /** Where the press began, moves committed so far, and whether it ever travelled past a tap. */
+  start: Point;
+  commits: number;
+  travelled: boolean;
+  /** The game is won: the gesture moves nothing more. */
+  done: boolean;
+}
+
+/** What the gesture does now. */
+export type Step =
+  | { kind: 'hold'; tile: number; progress: number }
+  | { kind: 'commit'; tile: number }
+  | { kind: 'idle' };
+
+const IDLE: Step = { kind: 'idle' };
+/** A flick's speed is measured over about the last 50 ms of moves; older moves are dropped. */
+const FLICK_SPAN_MS = 50;
+const TRAIL_MS = 150;
+
+/** The way a movable `tile` slides into the gap, if it is next to it. */
+function directionOf(board: Board, tile: number): Direction | undefined {
+  return DIRECTIONS.find((direction) => tileForDirection(board, direction) === tile);
+}
+
+/** How far a point is from another, along `direction` (negative: away from it). */
+function along(direction: Direction, from: Point, to: Point): number {
+  const unit = UNIT[direction];
+  return (to.x - from.x) * unit.x + (to.y - from.y) * unit.y;
+}
+
+/**
+ * A press on `tile` (undefined: the tray) at `at`: a tile next to the gap is held and follows the
+ * pointer; any other press is a swipe, which moves the tile on that side of the gap.
+ */
+export function startGesture(
+  board: Board,
+  finished: boolean,
+  tile: number | undefined,
+  at: Point,
+): Gesture | undefined {
+  if (finished) return undefined;
+  const chosen = movable(board, false, tile);
+  const direction = chosen === undefined ? undefined : directionOf(board, chosen);
+  const held =
+    chosen === undefined || direction === undefined ? undefined : { tile: chosen, direction };
+  const trail = [at];
+  return {
+    board,
+    before: board,
+    held,
+    anchor: at,
+    last: at,
+    trail,
+    start: at,
+    commits: 0,
+    travelled: false,
+    done: false,
+  };
+}
+
+/** Whether `live`, the board on screen, is one this gesture expects: its own, or the one before its last commit (not drawn yet). */
+export function expects(gesture: Gesture, live: Board): boolean {
+  const same = (board: Board) => board.join() === live.join();
+  return same(gesture.board) || same(gesture.before);
+}
+
+/** How far a held tile has gone from its cell towards the gap: the share of a cell, 0 to 1. */
+export function progressOf(direction: Direction, dx: number, dy: number, cellPx: number): number {
+  const unit = UNIT[direction];
+  const share = (dx * unit.x + dy * unit.y) / cellPx;
+  return Math.min(1, Math.max(0, share));
+}
+
+/**
+ * After a tile moved, with the pointer at `at` on cells `cellPx` wide: the board after the move,
+ * and the gesture re-anchored where that tile lands (one cell on from the anchor, in its
+ * direction). From there it holds the tile that goes the same way now (the next one of the row,
+ * which the finger pushes on). With none left that way it is a swipe from the finger, which may
+ * move a tile another way. The winning move ends it: nothing is held or moved after.
+ * So the next tile starts to move only once the finger has pushed the first one all the way, as a
+ * row of real blocks would, and a short swipe moves one tile, however small the cells.
+ */
+function committed(
+  gesture: Gesture,
+  move: { tile: number; direction: Direction },
+  at: Point,
+  cellPx: number,
+) {
+  const { tile, direction } = move;
+  const board = applyMove(gesture.board, tile) ?? gesture.board;
+  const done = isSolved(board);
+  const next = done ? undefined : tileForDirection(board, direction);
+  const held = next === undefined ? undefined : { tile: next, direction };
+  const unit = UNIT[direction];
+  const { x, y } = gesture.anchor;
+  // A swipe from where it lands could start behind the finger and read as a swipe back.
+  const anchor =
+    held === undefined ? at : { x: x + unit.x * cellPx, y: y + unit.y * cellPx, t: at.t };
+  const commits = gesture.commits + 1;
+  const step: Step = { kind: 'commit', tile };
+  const before = gesture.board;
+  return { gesture: { ...gesture, board, before, held, anchor, commits, done }, step };
+}
+
+/** A swipe: commits the tile on the swiped side of the gap once the swipe is long enough. */
+function swipeStep(gesture: Gesture, at: Point, cellPx: number) {
+  const direction = swipeDirection(at.x - gesture.anchor.x, at.y - gesture.anchor.y);
+  const tile = direction === undefined ? undefined : tileForDirection(gesture.board, direction);
+  if (direction === undefined || tile === undefined) return { gesture, step: IDLE };
+  return committed(gesture, { tile, direction }, at, cellPx);
+}
+
+/**
+ * The pointer at `at`: a new move for the trail, unless it is where the last move was (a pointer
+ * up there, which says nothing about speed).
+ */
+function withMove(gesture: Gesture, at: Point): Gesture {
+  const far = Math.hypot(at.x - gesture.start.x, at.y - gesture.start.y) >= TAP_SLOP_PX;
+  const travelled = gesture.travelled || far;
+  if (at.x === gesture.last.x && at.y === gesture.last.y) return { ...gesture, travelled };
+  const trail = [...gesture.trail, at].filter((point) => at.t - point.t <= TRAIL_MS);
+  return { ...gesture, last: at, trail, travelled };
+}
+
+/**
+ * Whether a held tile, still at its press, is being swiped another way: across its free axis or
+ * away from the gap, as far as a swipe. It then lets go and is a swipe from the press.
+ */
+function swipedAway(gesture: Gesture, at: Point): boolean {
+  const { held } = gesture;
+  if (held === undefined || gesture.commits > 0) return false;
+  const direction = swipeDirection(at.x - gesture.anchor.x, at.y - gesture.anchor.y);
+  return direction !== undefined && direction !== held.direction;
+}
+
+/** The pointer moved to `at`, on a board whose cells are `cellPx` wide on screen. */
+export function stepGesture(
+  gesture: Gesture,
+  at: Point,
+  cellPx: number,
+): { gesture: Gesture; step: Step } {
+  const moved = withMove(gesture, at);
+  if (moved.done) return { gesture: moved, step: IDLE };
+  const { held } = moved;
+  if (held === undefined || swipedAway(moved, at))
+    return swipeStep({ ...moved, held: undefined }, at, cellPx);
+  const progress = progressOf(held.direction, at.x - moved.anchor.x, at.y - moved.anchor.y, cellPx);
+  if (progress < COMMIT_SHARE)
+    return { gesture: moved, step: { kind: 'hold', tile: held.tile, progress } };
+  return committed(moved, held, at, cellPx);
+}
+
+/** The speed of the last moves along `direction`, px per ms, over about FLICK_SPAN_MS. */
+function speedOf(direction: Direction, gesture: Gesture): number {
+  const { trail, last } = gesture;
+  const recent = trail.find((point) => point !== last && last.t - point.t <= FLICK_SPAN_MS);
+  const from = recent ?? trail.at(-2);
+  if (from === undefined || last.t <= from.t) return 0;
+  return along(direction, from, last) / (last.t - from.t);
+}
+
+/**
+ * The pointer lifted at time `now`: a held tile flicked towards the gap (fast over its last moves,
+ * far enough, and still moving when lifted) commits; anything else springs back.
+ */
+export function releaseGesture(gesture: Gesture, now: number): Step {
+  const { held, last } = gesture;
+  if (held === undefined || gesture.done) return IDLE;
+  const flicked =
+    along(held.direction, gesture.anchor, last) >= FLICK_MIN_PX &&
+    speedOf(held.direction, gesture) >= FLICK_PX_PER_MS &&
+    now - last.t <= FLICK_WINDOW_MS;
+  return flicked ? { kind: 'commit', tile: held.tile } : IDLE;
+}
+
+/** Whether the press, lifted at `at`, was a tap: it moved nothing and never travelled far. */
+export function isTap(gesture: Gesture, at: Point): boolean {
+  const far = Math.hypot(at.x - gesture.start.x, at.y - gesture.start.y) >= TAP_SLOP_PX;
+  return gesture.commits === 0 && !gesture.travelled && !far;
+}
+
+/** Where a held tile is drawn: its cell shifted by its progress towards the gap, in cells. */
+export function dragShift(
+  board: Board,
+  drag: { tile: number; progress: number } | undefined,
+): { col: number; row: number } | undefined {
+  const direction = drag === undefined ? undefined : directionOf(board, drag.tile);
+  if (drag === undefined || direction === undefined) return undefined;
+  const unit = UNIT[direction];
+  return { col: unit.x * drag.progress, row: unit.y * drag.progress };
 }

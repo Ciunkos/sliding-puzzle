@@ -6,9 +6,10 @@
 import type { ReactElement } from 'react';
 import type { SavedGame } from '../game/client.tsx';
 import type { PuzzleState } from './definition.ts';
+import { dragShift } from './input.ts';
 import type { Size } from './rules.ts';
 import { boardClass, place } from './styles.ts';
-import { useBoardInput } from './use-board-input.ts';
+import { type DragView, useBoardInput } from './use-board-input.ts';
 import { layout, pictureBackground, type Place, type TileView } from './view-model.ts';
 
 /** How the board looks: the skin's name, its picture (if any) and whether the 3D board draws it. */
@@ -38,6 +39,8 @@ interface BoardViewProps {
   onBlocked?: (tile: number | undefined) => void;
   /** The tile to wiggle (it could not move); a new serial wiggles it again. */
   nudge?: { tile: number; serial: number } | undefined;
+  /** Hears the held tile while a drag is on (undefined when none), e.g. for the 3D board. */
+  onDrag?: (drag: DragView | undefined) => void;
 }
 
 /** The visible face of a tile: its number, or its square of the picture with an optional badge. */
@@ -63,19 +66,21 @@ function TileButton(props: {
   look: BoardLook;
   /** 'a' or 'b' (they take turns, so the wiggle starts again) while it wiggles. */
   nudge?: 'a' | 'b' | undefined;
+  /** Held by a drag: how far from its cell it is drawn, in cells. */
+  shift?: { col: number; row: number } | undefined;
 }): ReactElement {
-  const { tile, size } = props;
+  const { tile, size, shift } = props;
   return (
     <button
       type="button"
-      className="sp-tile"
+      className={shift === undefined ? 'sp-tile' : 'sp-tile sp-held'}
       data-testid={`tile-${String(tile.tile)}`}
       data-tile={tile.tile}
       data-nudge={props.nudge}
       aria-label={`Tile ${String(tile.tile)}`}
       aria-disabled={!tile.movable}
       tabIndex={props.tabStop ? 0 : -1}
-      style={place(size, tile)}
+      style={place(size, tile, shift)}
     >
       <Face tile={tile.tile} size={size} look={props.look} />
     </button>
@@ -104,15 +109,43 @@ export function nudgeOf(nudge: BoardViewProps['nudge'], tile: number): 'a' | 'b'
   return nudge.serial % 2 === 0 ? 'a' : 'b';
 }
 
+/** Every tile of the board in tile-number order; the held one drawn where the drag has it. */
+export function Tiles(props: {
+  game: SavedGame<PuzzleState>;
+  look: BoardLook;
+  tabStop: number;
+  nudge: BoardViewProps['nudge'];
+  drag: DragView | undefined;
+}): ReactElement {
+  const view = layout(props.game);
+  const shift = dragShift(props.game.state.board, props.drag);
+  return (
+    <>
+      {view.tiles.map((tile) => (
+        <TileButton
+          key={tile.tile}
+          tile={tile}
+          size={view.size}
+          tabStop={tile.tile === props.tabStop}
+          look={props.look}
+          nudge={nudgeOf(props.nudge, tile.tile)}
+          shift={tile.tile === props.drag?.tile ? shift : undefined}
+        />
+      ))}
+    </>
+  );
+}
+
 export function BoardView({
   game,
   onMove,
   look = NUMBERS,
   onBlocked,
   nudge,
+  onDrag,
 }: BoardViewProps): ReactElement {
   const view = layout(game);
-  const input = useBoardInput(game.state.board, game.finished, onMove, onBlocked);
+  const input = useBoardInput(game.state.board, game.finished, onMove, onBlocked, onDrag);
   return (
     <div
       ref={input.ref}
@@ -125,22 +158,15 @@ export function BoardView({
       className={boardClass(view.size, game.finished, look.layered)}
       onKeyDown={input.onKeyDown}
       onPointerDown={input.onPointerDown}
+      onPointerMove={input.onPointerMove}
       onPointerUp={input.onPointerUp}
       onPointerCancel={input.onPointerCancel}
+      onLostPointerCapture={input.onLostPointerCapture}
       onClick={input.onClick}
       onFocus={input.onFocus}
     >
       <Blank size={view.size} finished={game.finished} look={look} at={view.blank} />
-      {view.tiles.map((tile) => (
-        <TileButton
-          key={tile.tile}
-          tile={tile}
-          size={view.size}
-          tabStop={tile.tile === input.tabStop}
-          look={look}
-          nudge={nudgeOf(nudge, tile.tile)}
-        />
-      ))}
+      <Tiles game={game} look={look} tabStop={input.tabStop} nudge={nudge} drag={input.drag} />
     </div>
   );
 }

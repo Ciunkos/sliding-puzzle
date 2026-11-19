@@ -12,15 +12,23 @@ export interface SceneSurface {
 /** Why there is no 3D board although the player wants one. */
 export type NoScene = 'no-webgl' | 'save-data';
 
-const CONTEXT: WebGLContextAttributes = {
-  alpha: true,
-  antialias: true,
-  depth: true,
-  stencil: false,
-  premultipliedAlpha: true,
-  preserveDrawingBuffer: false,
-  powerPreference: 'low-power',
-};
+/**
+ * The context: transparent over the page, no stencil. Multisampling only on screens below a pixel
+ * ratio of 2, where edges would show steps: at 2 or more the pixels are small enough, and it was
+ * a third of the frame time where WebGL runs without a GPU. The faster GPU where there are two
+ * (on phones `low-power` may pick a slower path).
+ */
+function contextFor(pixelRatio: number): WebGLContextAttributes {
+  return {
+    alpha: true,
+    antialias: pixelRatio < 2,
+    depth: true,
+    stencil: false,
+    premultipliedAlpha: true,
+    preserveDrawingBuffer: false,
+    powerPreference: 'high-performance',
+  };
+}
 
 /** navigator.connection is not in every browser (nor in TypeScript's DOM types). */
 function savesData(): boolean {
@@ -35,7 +43,7 @@ function savesData(): boolean {
 function probe(): SceneSurface | NoScene {
   if (savesData()) return 'save-data';
   const canvas = document.createElement('canvas');
-  const gl = canvas.getContext('webgl2', CONTEXT);
+  const gl = canvas.getContext('webgl2', contextFor(devicePixelRatio));
   return gl === null ? 'no-webgl' : { canvas, gl };
 }
 

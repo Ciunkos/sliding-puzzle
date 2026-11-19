@@ -12,6 +12,8 @@ import {
   type Tilt,
   tiltChanged,
 } from './scene-model.ts';
+import { FPS_FLAG } from './use-fps-flag.ts';
+import { publishStats, qualityNow, rememberQuality } from './use-frame-quality.ts';
 import type { SceneSurface } from './use-scene-surface.ts';
 import { createRuntime, type SceneRuntime } from './use-three-runtime.ts';
 
@@ -30,6 +32,13 @@ export interface Board3DProps {
    * `serial`) wiggles it again; undefined or the same object does nothing.
    */
   nudge?: { tile: number; serial: number } | undefined;
+  /**
+   * The tile the player is pulling and how far, 0 (in its cell) to 1 (over the gap): the cube sits
+   * exactly there. Undefined when nothing is pulled: a cube let go springs back from where it is.
+   * A committed move changes `board` in the same render as this becomes undefined: the slide then
+   * starts from the dragged place. Ignored under reduced motion.
+   */
+  drag?: { tile: number; progress: number } | undefined;
   /** The first frame is drawn: the DOM board may hand its looks over. */
   onReady: () => void;
   /** The WebGL context was lost: back to the flat board. */
@@ -42,7 +51,13 @@ interface Live {
   wrapper: HTMLDivElement;
 }
 
-/** Draws a frame when asked, and keeps drawing only while the runtime says something moves. */
+/** With `?fps` the loop draws every frame, so the readout has frames to measure. */
+const CONTINUOUS = FPS_FLAG;
+
+/**
+ * Draws a frame when asked, and keeps drawing only while the runtime says something moves (or
+ * always, with the `?fps` readout).
+ */
 function demandLoop(draw: (now: number) => boolean, onFirst: () => void) {
   let frame = 0;
   let first = true;
@@ -55,7 +70,7 @@ function demandLoop(draw: (now: number) => boolean, onFirst: () => void) {
       first = false;
       onFirst();
     }
-    if (busy) invalidate();
+    if (busy || CONTINUOUS) invalidate();
   };
   const invalidate = () => {
     if (frame === 0 && !stopped) frame = requestAnimationFrame(tick);
@@ -81,6 +96,42 @@ interface Shown {
 }
 
 /**
+ * Keeps the drawing buffer sized to the wrapper and the screen: on a resize, and when the window
+ * moves to a screen of another pixel ratio. Setting a canvas's size clears it, even to the same
+ * size, so only on a real change, and the frame is drawn in the same task.
+ */
+function fitTo(wrapper: HTMLDivElement, runtime: SceneRuntime, drawNow: () => void) {
+  let width = 0;
+  let ratio = 0;
+  const fit = () => {
+    if (wrapper.clientWidth === width && devicePixelRatio === ratio) return;
+    width = wrapper.clientWidth;
+    ratio = devicePixelRatio;
+    runtime.resize(width, ratio);
+    drawNow();
+  };
+  let screen: MediaQueryList | undefined;
+  const onScreen = () => {
+    fit();
+    watchScreen();
+  };
+  const watchScreen = () => {
+    screen?.removeEventListener('change', onScreen);
+    screen = matchMedia(`(resolution: ${String(devicePixelRatio)}dppx)`);
+    screen.addEventListener('change', onScreen);
+  };
+  fit();
+  watchScreen();
+  const observer = new ResizeObserver(fit);
+  observer.observe(wrapper);
+  const stop = () => {
+    observer.disconnect();
+    screen?.removeEventListener('change', onScreen);
+  };
+  return { stop };
+}
+
+/**
  * Puts a built runtime on screen in one task: it gets the current board and skin, the canvas its
  * size, and draws its first frame at once, so the hand-over from the scene before shows no gap.
  */
@@ -95,20 +146,10 @@ function show(wrapper: HTMLDivElement, runtime: SceneRuntime, latest: RefObject<
   );
   runtime.setBoard(props.board, props.finished, props.moves, performance.now());
   wrapper.append(props.surface.canvas);
-  let width = 0;
-  const fit = () => {
-    // Setting a canvas's size clears it, even to the same size: only when it really changed.
-    if (wrapper.clientWidth === width) return;
-    width = wrapper.clientWidth;
-    runtime.resize(width, devicePixelRatio);
-    loop.drawNow();
-  };
-  fit();
-  const observer = new ResizeObserver(fit);
-  observer.observe(wrapper);
+  const sizing = fitTo(wrapper, runtime, loop.drawNow);
   const detach = () => {
     loop.stop();
-    observer.disconnect();
+    sizing.stop();
     runtime.dispose();
   };
   return { live: { runtime, invalidate: loop.invalidate, wrapper }, detach };
@@ -159,6 +200,9 @@ function build(scenes: Scenes, wanted: Wanted): void {
   const settled = createRuntime({
     ...{ ...wanted, canvas, gl, skin: scenes.latest.current.skin, claim },
     invalidate: () => scenes.shown?.live.invalidate(),
+    quality: qualityNow(),
+    onQuality: rememberQuality,
+    onStats: CONTINUOUS ? publishStats : undefined,
     cancelled: () => cancelled || scenes.closed,
   }).then(
     (runtime) => {
@@ -268,6 +312,22 @@ function useNudge(current: Live | undefined, nudge: Board3DProps['nudge']): void
   }, [current, tile, serial]);
 }
 
+/** Puts the pulled cube where the finger has it; lets the last one go when the pull ends. */
+function useDrag(current: Live | undefined, drag: Board3DProps['drag']): void {
+  const tile = drag?.tile;
+  const progress = drag?.progress;
+  const held = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (current === undefined) return;
+    const before = held.current;
+    if (before !== undefined && before !== tile)
+      current.runtime.drag(before, undefined, performance.now());
+    held.current = tile;
+    if (tile !== undefined) current.runtime.drag(tile, progress, performance.now());
+    current.invalidate();
+  }, [current, tile, progress]);
+}
+
 function boardRect(wrapper: HTMLElement) {
   const rect = wrapper.getBoundingClientRect();
   return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
@@ -319,6 +379,7 @@ export function useThreeBoard(props: Board3DProps): RefObject<HTMLDivElement | n
   const live = useRuntime(ref, props);
   useStateFeed(live, props);
   useNudge(live, props.nudge);
+  useDrag(live, props.drag);
   useTilt(live, props.tilt);
   return ref;
 }

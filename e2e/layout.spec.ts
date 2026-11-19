@@ -1,6 +1,7 @@
 // The page layout: the game is the whole screen, nothing scrolls, and the board is whole on screen.
 // Each test sets its own screen size, so it means the same in both projects.
-import { board, invalidProfile, startKnownGame } from './support/app.ts';
+import type { APIRequestContext, Page } from '@playwright/test';
+import { board, invalidProfile, solvedBanner, startKnownGame, tile } from './support/app.ts';
 import { expect, test, uniqueNickname } from './support/harness.ts';
 import {
   DESKTOP,
@@ -9,8 +10,11 @@ import {
   resetButton,
   scrolls,
   SMALL_PHONE,
+  SQUARE_WINDOW,
+  LANDSCAPE_TABLET,
   TABLET,
   TALL_PHONE,
+  overlap,
   targetSize,
 } from './support/layout.ts';
 import { menuButton, openMenu } from './support/menu.ts';
@@ -98,4 +102,88 @@ test('on a small phone the corner buttons and the sound switches are big enough 
   await openMenu(page);
 
   expect(await targetSize(page.locator('.sp-sound-switch').first())).toBeGreaterThanOrEqual(44);
+});
+
+/** The known game solved with its one move, without motion so the win card is where it ends up. */
+async function solveKnownGame(page: Page, request: APIRequestContext): Promise<void> {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await startKnownGame(page, request, uniqueNickname());
+  await tile(page, 15).click();
+  await expect(solvedBanner(page)).toBeVisible();
+}
+
+test('on a tall phone the win card leaves the whole solved picture in view', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize(TALL_PHONE);
+  await solveKnownGame(page, request);
+
+  expect(await overlap(page.getByTestId('win'), board(page))).toBe(false);
+  await expect(page.getByTestId('win')).toBeInViewport({ ratio: 1 });
+});
+
+test('on a desktop screen the win card leaves the whole solved picture in view', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize(DESKTOP);
+  await solveKnownGame(page, request);
+
+  expect(await overlap(page.getByTestId('win'), board(page))).toBe(false);
+  await expect(page.getByTestId('win')).toBeInViewport({ ratio: 1 });
+});
+
+test('on a small phone the solved game, its win card and New game fit on one screen', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize(SMALL_PHONE);
+  await solveKnownGame(page, request);
+
+  await expect(page.getByTestId('win')).toBeInViewport({ ratio: 1 });
+  await expect(newGameButton(page)).toBeInViewport({ ratio: 1 });
+  expect(await overlap(page.getByTestId('win'), newGameButton(page))).toBe(false);
+  expect(await scrolls(page)).toEqual({ vertically: false, sideways: false });
+});
+
+/** The win card is on screen, and over none of the board, New game and Reset. */
+async function cardClear(page: Page) {
+  const card = page.getByTestId('win');
+  await expect(card).toBeInViewport({ ratio: 1 });
+  return {
+    board: await overlap(card, board(page)),
+    newGame: await overlap(card, newGameButton(page)),
+    reset: await overlap(card, resetButton(page)),
+  };
+}
+
+test('on an upright tablet the win card is clear of the board and both actions', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize(TABLET);
+  await solveKnownGame(page, request);
+
+  expect(await cardClear(page)).toEqual({ board: false, newGame: false, reset: false });
+});
+
+test('on a 1024 x 768 screen the win card is clear of the board and both actions', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize(LANDSCAPE_TABLET);
+  await solveKnownGame(page, request);
+
+  expect(await cardClear(page)).toEqual({ board: false, newGame: false, reset: false });
+});
+
+test('in a nearly square window the win card is clear of the board and both actions', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize(SQUARE_WINDOW);
+  await solveKnownGame(page, request);
+
+  expect(await cardClear(page)).toEqual({ board: false, newGame: false, reset: false });
 });

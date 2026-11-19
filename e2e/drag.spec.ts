@@ -1,0 +1,193 @@
+// Direct manipulation: a held tile follows the finger and its move is made while the finger is
+// still down, once it has gone 0.3 of a cell (input.ts COMMIT_SHARE). Each test drags on the known board, where
+// tile 11 above the gap slides down and tile 14 left of it slides right.
+import type { APIRequestContext, Page } from '@playwright/test';
+import { board, moves, startKnownGame, tile } from './support/app.ts';
+import {
+  AFTER_TILE_11,
+  AFTER_TILE_11_THEN_12,
+  BOTTOM_ROW_PUSHED,
+  KNOWN_BOARD,
+} from './support/boards.ts';
+import {
+  boardEdge,
+  commitBatches,
+  dragTo,
+  pressTile,
+  tileCentre,
+  watchCommits,
+} from './support/drag.ts';
+import { expect, test, uniqueNickname } from './support/harness.ts';
+import { switch3d } from './support/menu.ts';
+
+test('a slow drag past a third of a cell moves the tile before the finger lifts', async ({
+  page,
+  request,
+}) => {
+  await startKnownGame(page, request, uniqueNickname());
+  const from = await pressTile(page, 11);
+  await dragTo(page, from, 0, from.cell * 0.45);
+
+  await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
+  await expect(moves(page)).toHaveText('Moves: 1');
+  await page.mouse.up();
+  await expect(moves(page)).toHaveText('Moves: 1');
+});
+
+test('a short slow drag springs back and moves nothing', async ({ page, request }) => {
+  await startKnownGame(page, request, uniqueNickname());
+  const from = await pressTile(page, 11);
+  await dragTo(page, from, 0, from.cell * 0.15);
+  await expect(tile(page, 11)).toHaveClass(/sp-held/);
+
+  await page.mouse.up();
+
+  await expect(tile(page, 11)).not.toHaveClass(/sp-held/);
+  await expect(board(page)).toHaveAttribute('data-board', KNOWN_BOARD);
+  await expect(moves(page)).toHaveText('Moves: 0');
+});
+
+test('one long drag along the bottom row pushes two tiles', async ({ page, request }) => {
+  await startKnownGame(page, request, uniqueNickname());
+  const from = await pressTile(page, 14);
+
+  // The first commits after 0.3 of a cell; the second once the first is pushed home, 1.3 cells.
+  await dragTo(page, from, from.cell * 1.5, 0);
+  await page.mouse.up();
+
+  await expect(board(page)).toHaveAttribute('data-board', BOTTOM_ROW_PUSHED);
+  await expect(moves(page)).toHaveText('Moves: 2');
+});
+
+test('a tap after a drag still slides the tapped tile', async ({ page, request }) => {
+  await startKnownGame(page, request, uniqueNickname());
+  const from = await pressTile(page, 11);
+  await dragTo(page, from, 0, from.cell * 0.6);
+  await page.mouse.up();
+
+  await tile(page, 12).click();
+
+  await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11_THEN_12);
+  await expect(moves(page)).toHaveText('Moves: 2');
+});
+
+test('with reduced motion a held tile stays put, and the move still comes at the threshold', async ({
+  page,
+  request,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await startKnownGame(page, request, uniqueNickname());
+  const from = await pressTile(page, 11);
+  await dragTo(page, from, 0, from.cell * 0.15);
+  await expect(tile(page, 11)).not.toHaveClass(/sp-held/);
+
+  await dragTo(page, from, 0, from.cell * 0.45);
+
+  await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
+  await page.mouse.up();
+});
+
+test('on a commit the held tile is let go in the same update that moves the board', async ({
+  page,
+  request,
+}) => {
+  // The 3D board is given the held tile: let go a frame early, its block would step back first.
+  await startKnownGame(page, request, uniqueNickname());
+  const from = await pressTile(page, 11);
+  await dragTo(page, from, 0, from.cell * 0.15);
+  await watchCommits(page);
+
+  await dragTo(page, from, 0, from.cell * 0.45);
+  await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
+  await page.mouse.up();
+
+  // The first change after the threshold: the held tile goes with the move. (Later, the next
+  // tile of the column is held at its cell, and let go on release: that changes no board.)
+  expect((await commitBatches(page))[0]).toEqual({ released: true, moved: true });
+});
+
+test('let go before the threshold, the held tile is let go and the board stays as it is', async ({
+  page,
+  request,
+}) => {
+  await startKnownGame(page, request, uniqueNickname());
+  const from = await pressTile(page, 11);
+  await dragTo(page, from, 0, from.cell * 0.15);
+  await watchCommits(page);
+
+  await page.mouse.up();
+
+  await expect(tile(page, 11)).not.toHaveClass(/sp-held/);
+  expect(await commitBatches(page)).toEqual([{ released: true, moved: false }]);
+});
+
+test('a right-click on a tile starts no drag: moving the mouse after it moves nothing', async ({
+  page,
+  request,
+}) => {
+  await startKnownGame(page, request, uniqueNickname());
+  const from = await tileCentre(page, 11);
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down({ button: 'right' });
+
+  await dragTo(page, from, 0, from.cell * 0.6);
+  await page.mouse.up({ button: 'right' });
+
+  await expect(moves(page)).toHaveText('Moves: 0');
+  await expect(board(page)).toHaveAttribute('data-board', KNOWN_BOARD);
+});
+
+test('a press released just outside the board ends, and the next tap works', async ({
+  page,
+  request,
+}) => {
+  await startKnownGame(page, request, uniqueNickname());
+  const edge = await boardEdge(page);
+  await page.mouse.move(edge.x - 2, edge.y);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + 6, edge.y, { steps: 2 });
+  await page.mouse.up();
+
+  await tile(page, 11).click();
+
+  await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
+});
+
+test('a quick short flick towards the gap moves the tile', async ({ page, request }) => {
+  await startKnownGame(page, request, uniqueNickname());
+  // On the flat board: its speed is measured from the moves, which a busy page (software 3D on a
+  // CI runner) would hand out late and slow.
+  await switch3d(page);
+  const from = await pressTile(page, 11);
+
+  // Just short of the 0.3-cell threshold, in two quick moves: only its speed can commit it.
+  await page.mouse.move(from.x, from.y + from.cell * 0.28, { steps: 2 });
+  await page.mouse.up();
+
+  await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
+});
+
+/** One move (tile 11 down), then tile 12 pressed and held a little towards the gap. */
+async function holdTwelveAfterOneMove(page: Page, request: APIRequestContext) {
+  await startKnownGame(page, request, uniqueNickname());
+  await tile(page, 11).click();
+  const from = await pressTile(page, 12);
+  await dragTo(page, from, -from.cell * 0.15, 0);
+  await expect(page.locator('[data-held="12"]')).toHaveCount(1);
+  return from;
+}
+
+test('a reset while a tile is held lets go of it, and the drag moves nothing after', async ({
+  page,
+  request,
+}) => {
+  const from = await holdTwelveAfterOneMove(page, request);
+
+  await page.getByTestId('reset').dispatchEvent('click');
+  await expect(board(page)).toHaveAttribute('data-board', KNOWN_BOARD);
+  await expect(page.locator('[data-held]')).toHaveCount(0);
+  await dragTo(page, from, -from.cell * 0.6, 0);
+  await page.mouse.up();
+
+  await expect(board(page)).toHaveAttribute('data-board', KNOWN_BOARD);
+});

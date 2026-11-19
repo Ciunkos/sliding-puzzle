@@ -30,6 +30,7 @@ import {
   puzzleDefinition,
 } from './definition.ts';
 import { soundChanged } from './events.ts';
+import { FpsPanel } from './fps-panel.tsx';
 import { Actions, Line, MenuButton, Status, WinCard } from './hud.tsx';
 import { LookControls } from './look-controls.tsx';
 import {
@@ -46,7 +47,9 @@ import { type Size, sizeOf } from './rules.ts';
 import { SoundButton, SoundSettings } from './sound-button.tsx';
 import { css } from './styles.ts';
 import { useAnnouncement } from './use-announcement.ts';
+import { type DragView } from './use-board-input.ts';
 import { useGameEvents, useSkinEvents } from './use-feature-events.ts';
+import { FPS_FLAG } from './use-fps-flag.ts';
 import { type LookChoices, useLook } from './use-look.ts';
 import { useMedia } from './use-media.ts';
 import { useMenu } from './use-menu.ts';
@@ -149,6 +152,8 @@ function Stage(props: {
   board: BoardHandlers;
 }): ReactElement {
   const { game, message } = props.session;
+  // The held tile while a drag is on: the 3D board draws its block where the finger has it.
+  const [drag, setDrag] = useState<DragView | undefined>(undefined);
   if (game === undefined) {
     return (
       <div className="sp-stage">
@@ -160,8 +165,11 @@ function Stage(props: {
   }
   const { nudge, onBlocked } = props.board;
   return (
-    <div className="sp-stage" data-shake={props.shake}>
-      {props.scene === undefined ? null : <Scene3D scene={{ ...props.scene, nudge }} game={game} />}
+    // data-held: the held tile the 3D board is given (e2e checks it goes with the move).
+    <div className="sp-stage" data-shake={props.shake} data-held={drag?.tile}>
+      {props.scene === undefined ? null : (
+        <Scene3D scene={{ ...props.scene, nudge, drag }} game={game} />
+      )}
       {/* Keyed by size: a new size gets new tiles instead of sliding them out of the old board. */}
       <BoardView
         key={game.state.board.length}
@@ -169,6 +177,7 @@ function Stage(props: {
         look={props.look}
         nudge={nudge}
         onBlocked={onBlocked}
+        onDrag={setDrag}
         onMove={(tile) => {
           props.session.move({ tile });
         }}
@@ -177,14 +186,12 @@ function Stage(props: {
   );
 }
 
-/** The board in the middle of the screen, and the win card over it once the game is solved. */
+/** The board in the middle of the screen, as large as fits. */
 function Arena(props: {
   session: Session;
   look: BoardLook;
   scene: SceneProps | undefined;
-  elapsed: number;
   board: BoardHandlers;
-  onNewGame: () => void;
 }): ReactElement {
   const { session } = props;
   const { game } = session;
@@ -207,14 +214,6 @@ function Arena(props: {
         shake={shake}
         board={props.board}
       />
-      {game?.finished === true ? (
-        <WinCard
-          banner={solvedText(game)}
-          result={resultText(props.elapsed, isNewPersonalBest(session.results, game))}
-          busy={session.busy}
-          onPlayAgain={props.onNewGame}
-        />
-      ) : null}
     </div>
   );
 }
@@ -528,12 +527,28 @@ function Hud(props: {
         session={session}
         look={props.screen.board}
         scene={props.screen.scene}
-        elapsed={elapsed}
         board={props.board}
-        onNewGame={actions.newGame}
       />
+      <Won session={session} elapsed={elapsed} onPlayAgain={actions.newGame} />
       <BottomBar session={session} actions={actions} />
     </div>
+  );
+}
+
+/**
+ * The win card, once the game is solved: in the line's place under the board (free once solved),
+ * so it never covers the solved picture. After the board in the DOM, so Tab reaches it next.
+ */
+function Won(props: { session: Session; elapsed: number; onPlayAgain: () => void }) {
+  const { game, results, busy } = props.session;
+  if (game?.finished !== true) return null;
+  return (
+    <WinCard
+      banner={solvedText(game)}
+      result={resultText(props.elapsed, isNewPersonalBest(results, game))}
+      busy={busy}
+      onPlayAgain={props.onPlayAgain}
+    />
   );
 }
 
@@ -619,6 +634,8 @@ function PuzzleScreen(props: ScreenProps): ReactElement {
       <p role="status" data-testid="announcer" className="sp-visually-hidden">
         {announced}
       </p>
+      {/* The `?fps` readout, only with ?fps in the address when the page opened. */}
+      {FPS_FLAG ? <FpsPanel /> : null}
     </section>
   );
 }

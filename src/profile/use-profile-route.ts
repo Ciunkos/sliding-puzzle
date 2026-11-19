@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { generateNickname } from './generate.ts';
 import { loadLastNickname } from './last-profile.ts';
-import { decideStart, profilePath, type StartDecision } from './url.ts';
+import { decideStart, keepQuery, profilePath, type StartDecision } from './url.ts';
 
 export interface ProfileRoute {
   route: StartDecision;
@@ -30,7 +30,7 @@ export function useProfileRoute(base: string, random: () => number): ProfileRout
 
   useEffect(() => {
     if (route.kind === 'play' && route.path !== window.location.pathname) {
-      window.history.replaceState(null, '', route.path);
+      window.history.replaceState(null, '', keepQuery(route.path, window.location));
     }
   }, [route]);
 
@@ -47,7 +47,7 @@ export function useProfileRoute(base: string, random: () => number): ProfileRout
   function go(nickname: string, mode: 'push' | 'replace'): void {
     const path = profilePath(nickname, base);
     if (mode === 'push') window.history.pushState(null, '', path);
-    else window.history.replaceState(null, '', path);
+    else window.history.replaceState(null, '', keepQuery(path, window.location));
     setRoute({ kind: 'play', nickname, path });
   }
 

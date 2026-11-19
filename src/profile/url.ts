@@ -55,3 +55,11 @@ export function decideStart(input: {
     location.kind === 'profile' ? location.nickname : (input.remembered ?? input.candidate);
   return { kind: 'play', nickname, path: profilePath(nickname, input.base) };
 }
+
+/**
+ * `path` with the query and the hash of `location`: replacing the address's path (a generated
+ * profile, the server's casing) keeps whatever else it carries, such as `?fps`.
+ */
+export function keepQuery(path: string, location: { search: string; hash: string }): string {
+  return `${path}${location.search}${location.hash}`;
+}

@@ -1,13 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import fc from 'fast-check';
+import { grid } from '../test-support/grid.ts';
 import {
+  adjacentToGap,
   approach,
   badgeShown,
   cameraDistance,
   CANVAS_UNITS,
   cornerAt,
+  dragAt,
   glowAt,
+  grabOffsetAt,
   RIM_UNITS,
   cellCentre,
   celebrationLift,
@@ -171,6 +175,81 @@ describe('badgeShown', () => {
   });
 });
 
+describe('dragAt', () => {
+  const REST = { x: -0.25, y: 0.25 };
+  const GAP = { x: 0.25, y: 0.25 };
+
+  test('a cube pulled nowhere is in its cell, pulled all the way is over the gap, half way is between', () => {
+    assert.deepEqual(
+      [dragAt(REST, GAP, 0), dragAt(REST, GAP, 1), dragAt(REST, GAP, 0.5)],
+      [REST, GAP, { x: 0, y: 0.25 }],
+    );
+  });
+
+  test('a pull past either end stays in the cell or over the gap', () => {
+    assert.deepEqual([dragAt(REST, GAP, -1), dragAt(REST, GAP, 2)], [REST, GAP]);
+  });
+
+  test('a cube pulled down its column keeps its column and goes a quarter of the way for 0.25', () => {
+    assert.deepEqual(dragAt({ x: 0.25, y: 0.25 }, { x: 0.25, y: -0.25 }, 0.25), {
+      x: 0.25,
+      y: 0.125,
+    });
+  });
+});
+
+describe('adjacentToGap', () => {
+  const BOARD = grid`
+    1 2 3
+    4 _ 5
+    6 7 8
+  `;
+
+  test('the four cubes beside the gap can be pulled into it', () => {
+    assert.deepEqual(
+      [
+        adjacentToGap(BOARD, 2, 3),
+        adjacentToGap(BOARD, 4, 3),
+        adjacentToGap(BOARD, 5, 3),
+        adjacentToGap(BOARD, 7, 3),
+      ],
+      [true, true, true, true],
+    );
+  });
+
+  test('a corner cube, the gap itself, and a tile not on the board cannot', () => {
+    assert.deepEqual(
+      [adjacentToGap(BOARD, 1, 3), adjacentToGap(BOARD, 0, 3), adjacentToGap(BOARD, 9, 3)],
+      [false, false, false],
+    );
+  });
+
+  test('a cube at the end of a row is not beside the first cube of the next row', () => {
+    const wrap = grid`
+      1 2 3
+      _ 4 5
+      6 7 8
+    `;
+
+    assert.equal(adjacentToGap(wrap, 3, 3), false);
+  });
+});
+
+describe('grabOffsetAt', () => {
+  const OFFSET = { x: 0.2, y: -0.4 };
+
+  test('when grabbed a cube is still where it was shown, and the offset is gone 120 ms later', () => {
+    assert.deepEqual(
+      [grabOffsetAt(OFFSET, 0), grabOffsetAt(OFFSET, 120), grabOffsetAt(OFFSET, 500)],
+      [OFFSET, { x: 0, y: 0 }, { x: 0, y: 0 }],
+    );
+  });
+
+  test('halfway, 60 ms in, a quarter of the offset is left: (1 - 1/2)^2', () => {
+    assert.deepEqual(grabOffsetAt(OFFSET, 60), { x: 0.05, y: -0.1 });
+  });
+});
+
 describe('pointerTilt', () => {
   test('a pointer over the centre of the board leaves it flat', () => {
     assert.deepEqual(pointerTilt(300, 250, RECT), { x: 0, y: 0 });
@@ -260,6 +339,16 @@ describe('approach', () => {
 
   test('a value within a hundredth of a degree of its target lands on it', () => {
     assert.equal(approach(4.995, 5, 1, 80), 5);
+  });
+
+  test('two frames of half the time ease as far as one frame of the whole: 120 Hz ends where 60 Hz does', () => {
+    const value = fc.double({ min: -10, max: 10, noNaN: true });
+    fc.assert(
+      fc.property(value, value, fc.double({ min: 0, max: 50, noNaN: true }), (from, to, dt) => {
+        const twice = approach(approach(from, to, dt / 2, 90), to, dt / 2, 90);
+        assert.ok(Math.abs(twice - approach(from, to, dt, 90)) <= 0.01);
+      }),
+    );
   });
 
   test('easing never overshoots its target', () => {

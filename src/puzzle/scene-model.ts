@@ -2,7 +2,7 @@
 // so the scene (use-three-board.ts) only reads them each frame. World units: the board's grid of
 // tiles is the unit square centred on the origin, x to the right, y up, tile tops at z = 0.
 import { IMPACT_MS, SETTLE_MS, springAt, springEasing } from './effects.ts';
-import type { Size } from './rules.ts';
+import type { Board, Size } from './rules.ts';
 
 export interface Vec2 {
   x: number;
@@ -65,6 +65,39 @@ export function slideAt(
     lift: flight >= 1 ? 0 : SLIDE_LIFT * Math.sin(Math.PI * flight),
     done,
   };
+}
+
+/**
+ * Where a cube is while the player pulls it from its cell (`rest`) toward the gap: exactly
+ * `progress` (0..1, clamped) of the way, no spring. Letting go or committing hands over to a
+ * slide from here, so it never jumps.
+ */
+export function dragAt(rest: Vec2, gap: Vec2, progress: number): Vec2 {
+  const p = Math.min(1, Math.max(0, progress));
+  return { x: rest.x + (gap.x - rest.x) * p, y: rest.y + (gap.y - rest.y) * p };
+}
+
+/** Whether `tile` sits right beside the gap (not diagonally): the only cubes a finger can pull. */
+export function adjacentToGap(board: Board, tile: number, size: Size): boolean {
+  const from = board.indexOf(tile);
+  const gap = board.indexOf(0);
+  if (tile === 0 || from < 0 || gap < 0) return false;
+  const across = Math.abs((from % size) - (gap % size));
+  const down = Math.abs(Math.floor(from / size) - Math.floor(gap / size));
+  return across + down === 1;
+}
+
+/** How long a grabbed cube takes to catch up with the finger from where it was shown. */
+const GRAB_MS = 120;
+
+/**
+ * What is left `t` ms after the grab of `offset`, the distance from where the finger's pull puts a
+ * cube to where it was shown (mid-slide, say): all of it at the grab, none from GRAB_MS on.
+ */
+export function grabOffsetAt(offset: Vec2, t: number): Vec2 {
+  if (t >= GRAB_MS) return { x: 0, y: 0 };
+  const left = (1 - Math.max(0, t) / GRAB_MS) ** 2;
+  return { x: offset.x * left, y: offset.y * left };
 }
 
 /** Scales (x, y) down to length 1 when it is longer, so a diagonal never tilts more than an axis. */

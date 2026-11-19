@@ -1,6 +1,6 @@
 // The tiles of the 3D board: a wooden cube (its top and sides cut from the plank, end grain at its
 // ends), a face (its piece of the same plank, or the picture), the number burned or inlaid into it
-// (a view of the number atlas), an optional number badge and a contact shadow, and how the skin
+// (a view of the number atlas) and an optional number badge, and how the skin
 // paints them. Every tile shares the same few images through texture views, so no tile paints a
 // canvas of its own. three.js wiring, named use-*.ts with the other browser wiring.
 import {
@@ -31,7 +31,6 @@ export interface TileObject {
   /** The face's own piece of plank, shown when no picture is. */
   wood: { map: Texture; normalMap: Texture; roughnessMap: Texture };
   badge: Mesh<BufferGeometry, MeshBasicMaterial>;
-  shadow: Mesh<BufferGeometry, MeshBasicMaterial>;
   /** The cube's own textures (views of shared images), freed with it. */
   owned: Texture[];
   /** Its number badge, drawn the first time a picture with numbers is shown. */
@@ -53,22 +52,12 @@ export interface TileKit {
   body: BufferGeometry;
   face: BufferGeometry;
   badge: BufferGeometry;
-  shadow: BufferGeometry;
-  shadowMap: Texture;
   wood: TileWood;
 }
 
-export function tileKit(sizes: TileSizes, shadowMap: Texture, wood: TileWood): TileKit {
+export function tileKit(sizes: TileSizes, wood: TileWood): TileKit {
   const badge = new PlaneGeometry(sizes.face * 0.3, sizes.face * 0.3);
-  return {
-    sizes,
-    body: bodyGeometry(sizes),
-    face: faceGeometry(sizes.face),
-    badge,
-    shadow: new PlaneGeometry(sizes.body * 1.3, sizes.body * 1.3),
-    shadowMap,
-    wood,
-  };
+  return { sizes, body: bodyGeometry(sizes), face: faceGeometry(sizes.face), badge, wood };
 }
 
 /** A view of `texture` showing cube `tile`'s window, for a surface whose middle `inner` is the face. */
@@ -102,7 +91,7 @@ function bodyMaterials(
   const shade = grainWindow(wood.seed, tile, WINDOW_SHARE).shade;
   grain.color.setScalar(shade);
   end.color.setScalar(shade);
-  return { materials: [end, end, grain, grain, grain, grain], owned };
+  return { materials: [end, grain], owned };
 }
 
 /** A view of the number atlas showing `tile`'s cell. */
@@ -167,18 +156,9 @@ export function createTile(tile: number, kit: TileKit): TileObject {
   badge.position.set(-corner, corner, 0.0012);
   badge.visible = false;
   group.add(body, top.face, top.number, badge);
-  const shadow = new Mesh(
-    kit.shadow,
-    new MeshBasicMaterial({
-      map: kit.shadowMap,
-      transparent: true,
-      depthWrite: false,
-      opacity: 0.45,
-    }),
-  );
   return {
     ...{ tile, group, body, face: top.face, number: top.number, wood: top.woodMaps },
-    ...{ badge, shadow, owned: [...owned, ...top.owned] },
+    ...{ badge, owned: [...owned, ...top.owned] },
   };
 }
 

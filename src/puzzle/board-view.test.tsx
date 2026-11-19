@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { SavedGame } from '../game/index.ts';
 import { grid } from '../test-support/grid.ts';
 import type { PuzzleState } from './index.ts';
-import { type BoardLook, BoardView, nudgeOf } from './board-view.tsx';
+import { type BoardLook, BoardView, nudgeOf, Tiles } from './board-view.tsx';
 
 /** A 3x3 board with the blank in the middle: tiles 2, 4, 6 and 8 can slide into it. */
 const BLANK_IN_THE_MIDDLE = grid`
@@ -32,6 +32,13 @@ function savedGame(board: readonly number[], finished: boolean): SavedGame<Puzzl
     finishedAt: null,
   };
 }
+
+const NUMBERS_LOOK = {
+  skin: 'numbers',
+  picture: undefined,
+  layered: false,
+  describedBy: undefined,
+} as const;
 
 const PICTURE = {
   skin: 'cat',
@@ -210,5 +217,27 @@ describe('nudgeOf', () => {
 
     assert.match(html, /data-testid="tile-3" data-tile="3" data-nudge="b" aria-label="Tile 3"/);
     assert.match(html, /data-testid="tile-1" data-tile="1" aria-label="Tile 1"/);
+  });
+});
+
+describe('Tiles', () => {
+  test('the held tile is drawn where the drag has it, and only that tile', () => {
+    // Tile 4 is left of the gap and slides right: half a cell on, it is drawn 50% further right.
+    const html = renderToStaticMarkup(
+      <Tiles
+        game={savedGame(BLANK_IN_THE_MIDDLE, false)}
+        look={NUMBERS_LOOK}
+        tabStop={4}
+        nudge={undefined}
+        drag={{ tile: 4, progress: 0.5 }}
+      />,
+    );
+
+    // Held: its own class, and drawn half a cell further right; no other tile is held.
+    assert.match(
+      html,
+      /class="sp-tile sp-held" data-testid="tile-4"[^>]*--sp-drag-x:50%;--sp-drag-y:0%/,
+    );
+    assert.equal(html.split('sp-held').length, 2);
   });
 });

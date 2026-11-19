@@ -45,7 +45,9 @@ describe('springAt', () => {
     const time = fc.double({ min: 0, max: 133, noNaN: true });
     fc.assert(
       fc.property(time, time, (a, b) => {
-        assert.ok(springAt(Math.min(a, b)) <= springAt(Math.max(a, b)));
+        // Near 0 ms the spring is 1 minus a decay times a sway that are both almost exactly 1:
+        // the subtraction cancels to about 1e-16 of rounding noise. Forward within 1e-12.
+        assert.ok(springAt(Math.min(a, b)) <= springAt(Math.max(a, b)) + 1e-12);
       }),
     );
   });

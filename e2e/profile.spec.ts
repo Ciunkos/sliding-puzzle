@@ -138,3 +138,9 @@ test('switching profiles, then Back and Forward show each its own game', async (
   await test.step('Back and Forward between the two', () => expectBackAndForward(page));
   await test.step('a new random profile and Back', () => expectNewRandomThenBack(page));
 });
+
+test('a first visit with a query keeps it in the profile address', async ({ page }) => {
+  await page.goto('/sliding-puzzle?fps');
+
+  await expect(page).toHaveURL(/\/sliding-puzzle\/p\/[a-z]+-[a-z]+-\d{3}\?fps$/);
+});

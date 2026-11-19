@@ -3,6 +3,7 @@
 // judged without a GPU). Where things stand and move is decided in scene-model.ts and effects.ts.
 import {
   AmbientLight,
+  Color,
   DirectionalLight,
   DoubleSide,
   Group,
@@ -66,11 +67,51 @@ export function faceGeometry(width: number): ShapeGeometry {
   return geometry;
 }
 
-/** A cube with rounded edges, its top at z = 0; its six sides are groups (+x -x +y -y +z -z). */
+/**
+ * A cube with rounded edges, its top at z = 0, in two groups: its two ends (+x and -x, end grain,
+ * material 0) and the rest (material 1). Two draws a cube instead of one per side.
+ */
 export function bodyGeometry(sizes: TileSizes): RoundedBoxGeometry {
   const geometry = new RoundedBoxGeometry(sizes.body, sizes.body, sizes.thickness, 4, sizes.bevel);
   geometry.translate(0, 0, -sizes.thickness / 2);
+  const sides = geometry.groups.map((group) => ({ ...group }));
+  const ends = sides.slice(0, 2).reduce((count, group) => count + group.count, 0);
+  const rest = sides.slice(2).reduce((count, group) => count + group.count, 0);
+  geometry.clearGroups();
+  geometry.addGroup(sides[0]?.start ?? 0, ends, 0);
+  geometry.addGroup(sides[2]?.start ?? ends, rest, 1);
   return geometry;
+}
+
+/**
+ * The soft shadow right under each cube, all cubes in one draw; placed every frame. Each shadow's
+ * opacity is its instance colour's red (a lifted cube's shadow pales): the shadow texture is
+ * black, so the colour only scales its alpha.
+ */
+export function contactShadows(
+  count: number,
+  width: number,
+  map: Texture,
+): InstancedMesh<PlaneGeometry, MeshBasicMaterial> {
+  const material = new MeshBasicMaterial({
+    map,
+    transparent: true,
+    depthWrite: false,
+    opacity: 0.45,
+  });
+  material.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <color_fragment>',
+      '#include <color_fragment>\n#ifdef USE_COLOR\n\tdiffuseColor.a *= vColor.r;\n#endif',
+    );
+  };
+  material.customProgramCacheKey = () => 'contact-shadow-alpha';
+  const mesh = new InstancedMesh(new PlaneGeometry(width, width), material, count);
+  // A colour per instance from the start, so the shader is built with it.
+  const full = new Color(1, 1, 1);
+  for (let i = 0; i < count; i++) mesh.setColorAt(i, full);
+  mesh.frustumCulled = false;
+  return mesh;
 }
 
 /** What the tray is made of: a plank's maps for the frame and the felt's for the floor. */
@@ -200,7 +241,9 @@ export function lights(look: LightLook): Lights {
   rim.position.set(1.6, 1.9, 0.7);
   const fill = new DirectionalLight(0xffeedd, 0.3);
   fill.position.set(1.2, -1.4, 1.4);
+  // The key light's target turns with the board too (it stays at the board's centre).
   group.add(
+    key.target,
     new HemisphereLight(look.sky, look.ground, look.skyIntensity),
     new AmbientLight(look.key, 0.08),
     key,

@@ -13,15 +13,25 @@ import type { Place } from './view-model.ts';
 /** A share of the stage's width in container units: 0.025 -> "2.5cqw". */
 const cqw = (share: number) => `${String(Math.round(share * 1000) / 10)}cqw`;
 
-/** The size and position of one cell: a tile slides when its transform changes. */
-export function place(size: Size, at: Place): CSSProperties {
+/**
+ * The size and position of one cell: a tile slides when its transform changes. A held tile
+ * (`shift`, in cells, see input.ts dragShift) is drawn that far from its cell, through the
+ * --sp-drag-x and --sp-drag-y properties added to its cell's position.
+ */
+export function place(size: Size, at: Place, shift?: { col: number; row: number }): CSSProperties {
   const share = `calc(100% / ${String(size)})`;
   // A percentage in translate() is of the element itself, i.e. one cell per 100%.
+  const x = `${String(at.col * 100)}%`;
+  const y = `${String(at.row * 100)}%`;
+  if (shift === undefined)
+    return { width: share, height: share, transform: `translate(${x}, ${y})` };
   return {
     width: share,
     height: share,
-    transform: `translate(${String(at.col * 100)}%, ${String(at.row * 100)}%)`,
-  };
+    '--sp-drag-x': `${String(shift.col * 100)}%`,
+    '--sp-drag-y': `${String(shift.row * 100)}%`,
+    transform: `translate(calc(${x} + var(--sp-drag-x)), calc(${y} + var(--sp-drag-y)))`,
+  } as CSSProperties;
 }
 
 export function boardClass(size: Size, finished: boolean, layered = false): string {
@@ -275,6 +285,8 @@ export const css = `
   transition: transform ${String(SLIDE_MS)}ms ${SLIDE_EASING};
 }
 .sp-tile[aria-disabled='true'] { cursor: default; }
+/* Held by a finger: it follows at once; on release it springs on into the gap or back. */
+.sp-tile.sp-held { transition: none; cursor: grabbing; }
 .sp-tile:focus-visible { z-index: 1; }
 /* A wooden block: grain in two directions over a lit gradient, a bevel and a burned-in number. */
 .sp-face {
@@ -381,27 +393,35 @@ export const css = `
   from { transform: translateY(-12%) scale(1.06); opacity: 0; }
   to { transform: none; opacity: 1; }
 }
-/* The win card: springs up over the lower part of the board. */
+/*
+ * The win card: springs in where the line under the board was (free once solved: on a phone the
+ * row above the actions, on a wider screen the space between them), never over the board, the
+ * solved picture being the reward. Compact, on one row; taller than the line's 44 px row, it grows
+ * upwards into the gap above (align-self: end). An overlay: it moves nothing.
+ */
 .sp-win-card {
-  grid-area: 1 / 1;
+  grid-area: line;
   align-self: end;
-  z-index: 2;
-  display: grid;
-  justify-items: center;
-  gap: 4px;
+  justify-self: center;
+  z-index: 3;
   box-sizing: border-box;
-  max-width: calc(${BOARD} - 24px);
-  margin-bottom: calc((100cqh - ${BOARD}) / 2 + 4cqmin);
-  padding: 14px 22px 16px;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-areas: "banner play" "result play";
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 2px;
+  padding: 2px 2px 2px 14px;
   border: 2px solid var(--sp-line);
-  border-radius: 20px;
+  border-radius: 999px;
   background: var(--sp-surface);
-  box-shadow: 0 18px 44px rgb(20 10 2 / 0.4);
-  text-align: center;
+  box-shadow: 0 12px 32px rgb(20 10 2 / 0.35);
   animation: sp-pop-in 620ms ${SPRING} both;
 }
-.sp-banner { margin: 0; color: var(--sp-won-text); font-size: 1.375rem; font-weight: 800; }
-.sp-result { margin: 0 0 6px; font-variant-numeric: tabular-nums; }
+.sp-banner { grid-area: banner; margin: 0; color: var(--sp-won-text); font-size: 1rem; font-weight: 800; line-height: 1.2; }
+.sp-result { grid-area: result; margin: 0; font-size: 0.8125rem; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.sp-win-card .sp-button { grid-area: play; padding: 8px 14px; }
 /* Transform only: fading the opacity would fail contrast checks while it runs. */
 @keyframes sp-pop-in {
   from { transform: translateY(24px) scale(0.6); }
