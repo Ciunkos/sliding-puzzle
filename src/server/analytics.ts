@@ -10,7 +10,7 @@ import type { PathKind } from './paths.ts';
 export const DEFAULT_POSTHOG_HOST = 'https://eu.i.posthog.com';
 /** The largest event body forwarded, in bytes. */
 export const MAX_EVENT_BYTES = 65_536;
-/** The ingest paths the PostHog SDK posts to; everything else under ph/ is not found. */
+/** The ingest paths the PostHog SDK posts to. Besides the SDK's settings request, nothing else under ph/ is found. */
 const INGEST_PATH = /^\/(e|i\/v0(?:\/e)?|batch|capture)\/?$/;
 const hostSchema = z.string().regex(/^https:\/\/[a-z0-9.-]+$/);
 const NO_STORE = { 'Cache-Control': 'no-store' };
@@ -71,24 +71,17 @@ function refusal(request: Request, rest: string, token: string | undefined): num
   return undefined;
 }
 
-/**
- * Forwards one event batch: the body and its content type only. Cookies, the client's address and
- * every other header stay here; the answer comes back with its status and content type only.
- */
-async function proxy(request: Request, rest: string, settings: AnalyticsSettings) {
-  const refused = refusal(request, rest, settings.token);
-  if (refused !== undefined) return status(refused);
-  const body = await boundedBody(request, MAX_EVENT_BYTES);
-  if (body === undefined) return status(413);
+/** Asks PostHog, and answers with its status, content type and body only. 502 when it cannot. */
+async function forward(
+  request: Request,
+  rest: string,
+  settings: AnalyticsSettings,
+  init: RequestInit,
+): Promise<Response> {
   const parsed = hostSchema.safeParse(settings.host);
   const host = parsed.success ? parsed.data : DEFAULT_POSTHOG_HOST;
-  const contentType = request.headers.get('Content-Type') ?? 'application/json';
   try {
-    const upstream = await settings.fetch(`${host}${rest}${new URL(request.url).search}`, {
-      method: 'POST',
-      body,
-      headers: { 'Content-Type': contentType },
-    });
+    const upstream = await settings.fetch(`${host}${rest}${new URL(request.url).search}`, init);
     const headers = new Headers(NO_STORE);
     const answerType = upstream.headers.get('Content-Type');
     if (answerType !== null) headers.set('Content-Type', answerType);
@@ -96,6 +89,35 @@ async function proxy(request: Request, rest: string, settings: AnalyticsSettings
   } catch {
     return status(502);
   }
+}
+
+/**
+ * The SDK reads its project settings once per page, with a GET: JSON, for this project's token
+ * only. Script code (`config.js`) is never fetched from PostHog; the SDK itself is a pinned copy.
+ */
+function isSettingsRequest(request: Request, rest: string, token: string | undefined): boolean {
+  if (token === undefined || token === '') return false;
+  return request.method === 'GET' && rest === `/array/${token}/config`;
+}
+
+/**
+ * Forwards one event batch: the body and its content type only. Cookies, the client's address and
+ * every other header stay here; the answer comes back with its status and content type only.
+ */
+async function proxy(request: Request, rest: string, settings: AnalyticsSettings) {
+  if (isSettingsRequest(request, rest, settings.token)) {
+    return forward(request, rest, settings, { method: 'GET' });
+  }
+  const refused = refusal(request, rest, settings.token);
+  if (refused !== undefined) return status(refused);
+  const body = await boundedBody(request, MAX_EVENT_BYTES);
+  if (body === undefined) return status(413);
+  const contentType = request.headers.get('Content-Type') ?? 'application/json';
+  return forward(request, rest, settings, {
+    method: 'POST',
+    body,
+    headers: { 'Content-Type': contentType },
+  });
 }
 
 export function analyticsResponse(

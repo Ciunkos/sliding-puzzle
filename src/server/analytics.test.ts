@@ -112,6 +112,51 @@ describe('analyticsResponse', () => {
     assert.equal(calls.length, 0);
   });
 
+  test("the SDK's settings request for this project is fetched from PostHog, without the cookie", async () => {
+    // Given a stand-in PostHog
+    const calls: Forwarded[] = [];
+    const rest = '/array/phc_test_token/config';
+    const headers = { cookie: 'session=secret', 'x-forwarded-for': '203.0.113.7' };
+    const request = new Request(`${ORIGIN}/sliding-puzzle/ph${rest}?ver=1`, { headers });
+
+    // When the SDK asks for its project settings
+    const res = await analyticsResponse(request, proxyPath(rest), settings(calls));
+
+    // Then PostHog was asked, without the player's cookie or address, and nothing is cached
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+    assert.deepEqual(calls, [
+      {
+        url: 'https://eu.i.posthog.com/array/phc_test_token/config?ver=1',
+        body: '',
+        cookie: null,
+        forwardedFor: null,
+      },
+    ]);
+  });
+
+  test("a settings request for another project's token is 404 and nothing is forwarded", async () => {
+    const calls: Forwarded[] = [];
+    const rest = '/array/phc_other_token/config';
+    const request = new Request(`${ORIGIN}/sliding-puzzle/ph${rest}`);
+
+    const res = await analyticsResponse(request, proxyPath(rest), settings(calls));
+
+    assert.equal(res.status, 404);
+    assert.equal(calls.length, 0);
+  });
+
+  test('a request for script code from PostHog is 404 and nothing is forwarded', async () => {
+    const calls: Forwarded[] = [];
+    const rest = '/array/phc_test_token/config.js';
+    const request = new Request(`${ORIGIN}/sliding-puzzle/ph${rest}`);
+
+    const res = await analyticsResponse(request, proxyPath(rest), settings(calls));
+
+    assert.equal(res.status, 404);
+    assert.equal(calls.length, 0);
+  });
+
   test('a body over 64 kB is refused with 413 and nothing is forwarded', async () => {
     const calls: Forwarded[] = [];
     const tooBig = eventPost('/batch/', 'x'.repeat(65_537));
