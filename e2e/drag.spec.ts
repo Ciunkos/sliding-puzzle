@@ -13,12 +13,12 @@ import {
   boardEdge,
   commitBatches,
   dragTo,
+  flickDown,
   pressTile,
   tileCentre,
   watchCommits,
 } from './support/drag.ts';
 import { expect, test, uniqueNickname } from './support/harness.ts';
-import { switch3d } from './support/menu.ts';
 
 test('a slow drag past a third of a cell moves the tile before the finger lifts', async ({
   page,
@@ -155,14 +155,10 @@ test('a press released just outside the board ends, and the next tap works', asy
 
 test('a quick short flick towards the gap moves the tile', async ({ page, request }) => {
   await startKnownGame(page, request, uniqueNickname());
-  // On the flat board: its speed is measured from the moves, which a busy page (software 3D on a
-  // CI runner) would hand out late and slow.
-  await switch3d(page);
-  const from = await pressTile(page, 11);
+  const from = await tileCentre(page, 11);
 
-  // Just short of the 0.3-cell threshold, in two quick moves: only its speed can commit it.
-  await page.mouse.move(from.x, from.y + from.cell * 0.28, { steps: 2 });
-  await page.mouse.up();
+  // Just short of the 0.3-cell threshold, in 16 ms: only its speed can commit it.
+  await flickDown(page, from, from.cell * 0.28);
 
   await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
 });

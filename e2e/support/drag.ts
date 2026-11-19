@@ -32,6 +32,32 @@ export async function dragTo(page: Page, from: At, dx: number, dy: number): Prom
 }
 
 /**
+ * A flick with the mouse, timed by the input's own timestamps rather than by how fast the test
+ * runs: pressed at `from`, moved by `dy` in two moves 8 ms apart, lifted 4 ms later. The page reads
+ * a gesture's speed from the events' timestamps, so a slow machine cannot turn it into a drag.
+ */
+export async function flickDown(page: Page, from: At, dy: number): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  const start = Date.now() / 1000;
+  type MouseType = 'mousePressed' | 'mouseMoved' | 'mouseReleased';
+  const mouse = (type: MouseType, share: number, ms: number) =>
+    cdp.send('Input.dispatchMouseEvent', {
+      type,
+      x: from.x,
+      y: from.y + dy * share,
+      button: 'left',
+      buttons: type === 'mouseReleased' ? 0 : 1,
+      clickCount: 1,
+      timestamp: start + ms / 1000,
+    });
+  await mouse('mousePressed', 0, 0);
+  await mouse('mouseMoved', 0.5, 8);
+  await mouse('mouseMoved', 1, 16);
+  await mouse('mouseReleased', 1, 20);
+  await cdp.detach();
+}
+
+/**
  * A real touch on the screen: down at `from`, moved by (dx, dy) in small steps, then calls
  * `whileDown` with the finger still down, and lifts it.
  */
