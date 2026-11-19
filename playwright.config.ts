@@ -10,6 +10,14 @@ const WORKER_PORT = 8797;
 /** The Worker's local D1 and other state: its own folder, never the `npm run worker:dev` one. */
 const WORKER_STATE = '.e2e/wrangler-state';
 
+// GitHub's runners have no GPU, and a software renderer logs and times differently. With
+// E2E_SOFTWARE_GL=1 (npm run test:e2e:nogpu) the browser draws WebGL in software here too, so a
+// failure that only a GPU-less machine shows is found before the push.
+const SOFTWARE_GL =
+  process.env.E2E_SOFTWARE_GL === '1'
+    ? ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader']
+    : [];
+
 export default defineConfig({
   testDir: 'e2e',
   fullyParallel: false,
@@ -21,7 +29,7 @@ export default defineConfig({
     // The full Chromium in its new headless mode, for the 3D board: WebGL2 runs on the GPU when
     // there is one (SwiftShader otherwise). The default headless shell also has WebGL2, but it
     // composites the canvas by reading it back, and logs "GPU stall due to ReadPixels" warnings.
-    launchOptions: { channel: 'chromium' },
+    launchOptions: { channel: 'chromium', args: SOFTWARE_GL },
   },
   projects: [
     {

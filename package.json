@@ -19,6 +19,7 @@
     "mutate:puzzle": "stryker run --mutate \"src/puzzle/**/*.ts,src/puzzle/**/*.tsx,!src/**/*.test.ts,!src/**/*.test.tsx,!src/**/use-*.ts,!src/**/client.tsx,!src/**/styles.ts\" --testFiles \"src/puzzle/**/*.test.ts,src/puzzle/**/*.test.tsx\" --incrementalFile reports/stryker-incremental-puzzle.json && node scripts/mutation-summary.js --floor 85",
     "mutate:game": "stryker run --mutate \"src/game/**/*.ts,src/game/**/*.tsx,!src/**/*.test.ts,!src/**/*.test.tsx,!src/**/use-*.ts,!src/**/client.tsx,!src/**/styles.ts\" --testFiles \"src/game/**/*.test.ts,src/game/**/*.test.tsx\" --incrementalFile reports/stryker-incremental-game.json && node scripts/mutation-summary.js --floor 85",
     "test:e2e": "playwright test",
+    "test:e2e:nogpu": "E2E_SOFTWARE_GL=1 playwright test",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write .",

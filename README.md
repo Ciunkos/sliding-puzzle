@@ -33,13 +33,14 @@ npm run dev     # API on :8787, web on :5173
 
 ## Commands
 
-| Command            | What it does                                                                     |
-| ------------------ | -------------------------------------------------------------------------------- |
-| `npm run check`    | Format, lint, types, unit and property tests, gate tests, computed checks, build |
-| `npm run test:e2e` | Playwright against the real servers, on a phone and a desktop project            |
-| `npm run mutate`   | Mutation testing: changes the code and checks that a test notices                |
-| `npm run dev`      | API and web together; Ctrl-C stops both                                          |
-| `npm run format`   | Prettier                                                                         |
+| Command                  | What it does                                                                     |
+| ------------------------ | -------------------------------------------------------------------------------- |
+| `npm run check`          | Format, lint, types, unit and property tests, gate tests, computed checks, build |
+| `npm run test:e2e`       | Playwright against the real servers, on a phone and a desktop project            |
+| `npm run test:e2e:nogpu` | The same, with WebGL drawn in software, as on the GPU-less CI runners            |
+| `npm run mutate`         | Mutation testing: changes the code and checks that a test notices                |
+| `npm run dev`            | API and web together; Ctrl-C stops both                                          |
+| `npm run format`         | Prettier                                                                         |
 
 Scoped tests: `node --import ./scripts/tsx-hooks.js --test src/puzzle`.
 
