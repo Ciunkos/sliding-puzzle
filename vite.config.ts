@@ -9,6 +9,7 @@ import {
   HASHED_ASSETS,
   pathHeaders,
   SERVICE_WORKER_PATH,
+  SHARE_IMAGE_PATH,
 } from './src/server/paths.ts';
 
 /** dist/web is the Workers static-assets directory: URL paths mirror file paths under it. */
@@ -26,6 +27,7 @@ function headersRule(path: string, headers: Record<string, string>): string {
 const HEADERS = `${[
   headersRule(`${HASHED_ASSETS}*`, pathHeaders(HASHED_ASSETS)),
   headersRule(SERVICE_WORKER_PATH, pathHeaders(SERVICE_WORKER_PATH)),
+  headersRule(SHARE_IMAGE_PATH, pathHeaders(SHARE_IMAGE_PATH)),
 ].join('\n')}\n`;
 
 /** Empties dist/web before a build (Vite only empties its outDir) and writes dist/web/_headers. */

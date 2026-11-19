@@ -90,6 +90,11 @@ expect_status "$BASE_URL$script" 200 "the shell's script $script"
 expect_header cache-control 'immutable' "the shell's script is immutable"
 ok "the shell's script $script (200, immutable)"
 
+expect_status "$APP/og.jpg" 200 "the share image"
+expect_header content-type 'image/jpeg' "the share image is a JPEG"
+expect_header cache-control 'max-age=86400' "the share image may be kept for a day"
+ok "the share image (200, image/jpeg, a day)"
+
 expect_status "$APP/assets/smoke-missing-0000.js" 404 "a missing hashed file is 404"
 header content-type | grep -qi 'text/html' && fail "a missing hashed file is not the shell" "it answered text/html"
 header cache-control | grep -qi 'immutable' && fail "a missing hashed file is not kept" "its 404 is marked immutable"

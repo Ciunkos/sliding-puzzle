@@ -103,4 +103,14 @@ describe('pathHeaders', () => {
   test('any other path gets no extra headers', () => {
     assert.deepEqual(pathHeaders('/sliding-puzzle/icons/icon.svg'), {});
   });
+
+  test('the share image may be kept for a day by link previews and browsers', () => {
+    assert.deepEqual(pathHeaders('/sliding-puzzle/og.jpg'), {
+      'Cache-Control': 'public, max-age=86400',
+    });
+  });
+
+  test('the share image is a file of the app, answered as an asset', () => {
+    assert.deepEqual(classify('/sliding-puzzle/og.jpg'), { kind: 'asset' });
+  });
 });

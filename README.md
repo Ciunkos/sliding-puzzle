@@ -1,8 +1,18 @@
 # Sliding Puzzle
 
-A 4×4 sliding puzzle (tiles 1–15 plus a blank). Open it and you are playing: the backend saves your
-game under a nickname, and the nickname is in the URL, so the link resumes it in any browser.
-There is no authentication.
+A wooden 3D sliding puzzle (3×3, 4×4 or 5×5) with pictures, sound and music. Open it and you are
+playing: the backend saves your game under a nickname, and the nickname is in the URL, so the link
+resumes it in any browser. There is no authentication.
+
+Play it: <https://ciunkos.com/sliding-puzzle>
+
+| Desktop                                   | Phone                                                                  |
+| ----------------------------------------- | ---------------------------------------------------------------------- |
+| ![A picture board](docs/desktop-dark.jpg) | <img src="docs/phone-light.jpg" alt="The game on a phone" width="260"> |
+| ![A solved board](docs/win-confetti.jpg)  | <img src="docs/phone-dark-menu.jpg" alt="The menu" width="260">        |
+
+More: [numbers](docs/numbers-light.jpg), [light theme](docs/desktop-light.jpg),
+[phone, dark](docs/phone-dark.jpg).
 
 ### Identity without authentication
 

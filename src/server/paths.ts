@@ -56,9 +56,13 @@ export const SERVICE_WORKER_PATH = `${BASE}/sw.js`;
 /** Built files whose names carry a hash of their content, so they never change. */
 export const HASHED_ASSETS = `${BASE}/assets/`;
 
+/** The image link previews show (og:image in index.html): a file of the app, not hashed. */
+export const SHARE_IMAGE_PATH = `${BASE}/og.jpg`;
+
 /**
  * Headers the app's files carry in every environment: the Node entry sets them, and the build writes
- * them into dist/web/_headers for Cloudflare. Hashed files may be kept for a year. The service
+ * them into dist/web/_headers for Cloudflare. Hashed files may be kept for a year, the share image a
+ * day. The service
  * worker may control BASE itself only with Service-Worker-Allowed, and is never cached, so an update
  * is seen at once.
  */
@@ -66,6 +70,8 @@ export function pathHeaders(pathname: string): Record<string, string> {
   if (pathname.startsWith(HASHED_ASSETS)) {
     return { 'Cache-Control': 'public, max-age=31536000, immutable' };
   }
+  // Not hashed, so it may change with a deploy: a day is long enough for previews to share it.
+  if (pathname === SHARE_IMAGE_PATH) return { 'Cache-Control': 'public, max-age=86400' };
   if (pathname !== SERVICE_WORKER_PATH) return {};
   return { 'Cache-Control': 'no-store', 'Service-Worker-Allowed': BASE };
 }
