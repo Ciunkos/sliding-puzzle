@@ -112,7 +112,7 @@ describe('analyticsResponse', () => {
     assert.equal(calls.length, 0);
   });
 
-  test("the SDK's settings request for this project is fetched from PostHog, without the cookie", async () => {
+  test("the SDK's settings request is fetched from PostHog without the cookie or the query", async () => {
     // Given a stand-in PostHog
     const calls: Forwarded[] = [];
     const rest = '/array/phc_test_token/config';
@@ -127,12 +127,35 @@ describe('analyticsResponse', () => {
     assert.equal(res.headers.get('cache-control'), 'no-store');
     assert.deepEqual(calls, [
       {
-        url: 'https://eu.i.posthog.com/array/phc_test_token/config?ver=1',
+        url: 'https://eu.i.posthog.com/array/phc_test_token/config',
         body: '',
         cookie: null,
         forwardedFor: null,
       },
     ]);
+  });
+
+  test('the settings answer is always JSON that the browser may not sniff as anything else', async () => {
+    // Given a PostHog that answers its settings with another content type
+    const rest = '/array/phc_test_token/config';
+    const upstream = () =>
+      Promise.resolve(
+        new Response('{"sessionRecording":false}', { headers: { 'content-type': 'text/html' } }),
+      );
+    const request = new Request(`${ORIGIN}/sliding-puzzle/ph${rest}`);
+
+    // When the SDK asks for its project settings
+    const res = await analyticsResponse(request, proxyPath(rest), {
+      token: TOKEN,
+      host: undefined,
+      fetch: upstream,
+    });
+
+    // Then the page gets it as JSON, with sniffing turned off
+    assert.deepEqual(
+      [res.headers.get('content-type'), res.headers.get('x-content-type-options')],
+      ['application/json', 'nosniff'],
+    );
   });
 
   test("a settings request for another project's token is 404 and nothing is forwarded", async () => {

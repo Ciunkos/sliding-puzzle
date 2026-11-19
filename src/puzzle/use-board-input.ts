@@ -90,11 +90,14 @@ export function useBoardInput(
 ): BoardInput {
   const ref = useRef<HTMLDivElement>(null);
   const [preferred, setPreferred] = useState<number | undefined>(undefined);
-  /** Slides `tile` if it can move; else reports `blocked` (the tile the player meant) once. */
-  const slide = (tile: number | undefined, blocked = tile): number | undefined => {
+  /**
+   * Slides `tile` if it can move. Otherwise, on an open game, reports it blocked: the tile the
+   * player meant (`meant`, undefined when no tile was meant), unless `quiet` (a held key repeating).
+   */
+  const slide = (tile: number | undefined, meant: number | undefined, quiet = false) => {
     const chosen = movable(board, finished, tile);
     if (chosen === undefined) {
-      if (!finished) onBlocked(blocked);
+      if (!finished && !quiet) onBlocked(meant);
       return undefined;
     }
     setPreferred(chosen);
@@ -102,7 +105,7 @@ export function useBoardInput(
     return chosen;
   };
   const { takeSwipeClick, ...pointer } = useSwipe((direction) => {
-    slide(tileForDirection(board, direction));
+    slide(tileForDirection(board, direction), undefined);
   });
   return {
     ref,
@@ -112,13 +115,15 @@ export function useBoardInput(
       const direction = keyDirection(event);
       if (direction === undefined) return;
       event.preventDefault();
-      focusTile(ref, slide(tileForDirection(board, direction), tileOf(event.target)));
+      // A blocked arrow means no tile (none is on that side of the gap); held down it is quiet.
+      focusTile(ref, slide(tileForDirection(board, direction), undefined, event.repeat));
     },
     onFocus(event) {
       setPreferred(tileOf(event.target));
     },
     onClick(event) {
-      if (!takeSwipeClick()) slide(tileOf(event.target));
+      const tile = tileOf(event.target);
+      if (!takeSwipeClick()) slide(tile, tile);
     },
   };
 }

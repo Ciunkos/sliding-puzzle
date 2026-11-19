@@ -1,14 +1,45 @@
 // The game's menu: a modal dialog (opened with showModal by use-menu.ts) that holds the page's own
 // part (who is playing, usage statistics) and the game's options: board size, the board's look and
 // the best results. Presentational: texts and handlers come from the screen (client.tsx).
-import { type ReactElement, type ReactNode, type Ref, useId } from 'react';
+import { type ReactElement, type ReactNode, type Ref, useId, useRef } from 'react';
 import { type Size, SIZES } from './rules.ts';
 import { sizeLabel } from './view-model.ts';
 
-/** The dialog's click: one on the backdrop (the dialog element itself, not its content) closes it. */
-export function closeOnBackdrop(onClose: () => void) {
-  return (event: { target: unknown; currentTarget: unknown }): void => {
-    if (event.target === event.currentTarget) onClose();
+interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+interface PointerAt {
+  clientX: number;
+  clientY: number;
+  currentTarget: { getBoundingClientRect: () => Box };
+}
+
+/** Whether the pointer is outside the dialog's box, i.e. on the backdrop. */
+export function onBackdrop(event: PointerAt): boolean {
+  const box = event.currentTarget.getBoundingClientRect();
+  const x = event.clientX;
+  const y = event.clientY;
+  return x < box.left || x > box.right || y < box.top || y > box.bottom;
+}
+
+/**
+ * The dialog's pointer handlers: a press that starts and ends on the backdrop closes the menu. A
+ * drag from a field out onto the backdrop, a click on the scrollbar or a key's click does not.
+ * `started` remembers where the press began, across renders.
+ */
+export function backdropCloser(onClose: () => void, started: { current: boolean }) {
+  return {
+    onPointerDown: (event: PointerAt): void => {
+      started.current = onBackdrop(event);
+    },
+    onClick: (event: PointerAt): void => {
+      if (started.current && onBackdrop(event)) onClose();
+      started.current = false;
+    },
   };
 }
 
@@ -20,8 +51,8 @@ export function pickSize(onPick: (size: Size) => void, size: Size): () => void {
 }
 
 /**
- * The dialog itself: a title with a close button, then the sections. A click on the backdrop
- * (the dialog element itself, outside its content) closes it too; Escape is the browser's own.
+ * The dialog itself: a title with a close button, then the sections. A press on the backdrop
+ * closes it too (backdropCloser); Escape is the browser's own.
  */
 export function Menu(props: {
   dialogRef?: Ref<HTMLDialogElement>;
@@ -29,13 +60,16 @@ export function Menu(props: {
   children: ReactNode;
 }): ReactElement {
   const titleId = useId();
+  const started = useRef(false);
+  const closer = backdropCloser(props.onClose, started);
   return (
     <dialog
       ref={props.dialogRef}
       data-testid="menu"
       className="sp-menu"
       aria-labelledby={titleId}
-      onClick={closeOnBackdrop(props.onClose)}
+      onPointerDown={closer.onPointerDown}
+      onClick={closer.onClick}
     >
       <div className="sp-menu-inner">
         <div className="sp-menu-head">

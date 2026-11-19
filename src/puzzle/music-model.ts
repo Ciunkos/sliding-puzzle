@@ -160,3 +160,20 @@ export function pads(bar: number): NoteEvent[] {
 export function musicBar(seed: number, bar: number): NoteEvent[] {
   return [...pads(bar), ...melody(seed, bar)];
 }
+
+/** Where the music scheduler is: the next bar to schedule, and when it starts (seconds). */
+export interface MusicPosition {
+  bar: number;
+  next: number;
+}
+
+/**
+ * The position to schedule from at `now`: as it is when the next bar has not started yet; else the
+ * first bar boundary after `now`, skipping the bars that were missed (a timer held up by a busy or
+ * hidden page), so they are never all played at once in the past.
+ */
+export function catchUp(position: MusicPosition, now: number, barSeconds: number): MusicPosition {
+  if (position.next >= now) return position;
+  const missed = Math.ceil((now - position.next) / barSeconds);
+  return { bar: position.bar + missed, next: position.next + missed * barSeconds };
+}

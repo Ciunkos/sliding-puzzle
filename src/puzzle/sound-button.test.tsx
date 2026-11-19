@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { SOUND_STYLES, SoundButton, SoundSettings } from './sound-button.tsx';
+import { SoundButton, SoundSettings } from './sound-button.tsx';
 
 const NONE = () => undefined;
 
@@ -64,11 +64,5 @@ describe('sound controls', () => {
     );
 
     assert.equal(lines(html), MUTED_MUSIC_OFF);
-  });
-
-  test('the styles give the button a 44 px round target and style only sp-sound classes', () => {
-    assert.match(SOUND_STYLES, /\.sp-sound-button \{[^}]*inline-size: 44px; block-size: 44px;/);
-    assert.match(SOUND_STYLES, /\.sp-sound-switch \{[^}]*min-block-size: 44px;/);
-    assert.doesNotMatch(SOUND_STYLES, /^\.(?!sp-sound-)/m);
   });
 });

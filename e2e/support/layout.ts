@@ -1,6 +1,6 @@
 // Steps and measurements of the page layout: screen sizes and overflow. No expected values are
 // decided here.
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 /** A small phone, the narrowest screen the page is made for. */
 export const SMALL_PHONE = { width: 320, height: 568 };
@@ -24,4 +24,10 @@ export function scrolls(page: Page): Promise<{ vertically: boolean; sideways: bo
     vertically: document.documentElement.scrollHeight > window.innerHeight,
     sideways: document.documentElement.scrollWidth > window.innerWidth,
   }));
+}
+
+/** The smaller side of an element on screen, in pixels: its touch target. */
+export async function targetSize(locator: Locator): Promise<number> {
+  const box = await locator.boundingBox();
+  return Math.min(box?.width ?? 0, box?.height ?? 0);
 }

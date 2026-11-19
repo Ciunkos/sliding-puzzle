@@ -71,19 +71,28 @@ function refusal(request: Request, rest: string, token: string | undefined): num
   return undefined;
 }
 
+/** How a forwarded answer is shaped: the query passed on, and the content type answered with. */
+interface Forwarding {
+  /** The client's query string; '' to send none. */
+  search: string;
+  /** The content type to answer with; undefined to pass PostHog's on. */
+  answerType: string | undefined;
+}
+
 /** Asks PostHog, and answers with its status, content type and body only. 502 when it cannot. */
 async function forward(
-  request: Request,
   rest: string,
   settings: AnalyticsSettings,
   init: RequestInit,
+  shape: Forwarding,
 ): Promise<Response> {
   const parsed = hostSchema.safeParse(settings.host);
   const host = parsed.success ? parsed.data : DEFAULT_POSTHOG_HOST;
   try {
-    const upstream = await settings.fetch(`${host}${rest}${new URL(request.url).search}`, init);
+    const upstream = await settings.fetch(`${host}${rest}${shape.search}`, init);
     const headers = new Headers(NO_STORE);
-    const answerType = upstream.headers.get('Content-Type');
+    headers.set('X-Content-Type-Options', 'nosniff');
+    const answerType = shape.answerType ?? upstream.headers.get('Content-Type');
     if (answerType !== null) headers.set('Content-Type', answerType);
     return new Response(upstream.body, { status: upstream.status, headers });
   } catch {
@@ -92,8 +101,11 @@ async function forward(
 }
 
 /**
- * The SDK reads its project settings once per page, with a GET: JSON, for this project's token
- * only. Script code (`config.js`) is never fetched from PostHog; the SDK itself is a pinned copy.
+ * The SDK reads its project settings once per page, with a GET of `/array/<token>/config` (the
+ * pinned SDK builds that path from its token): JSON, for this project's token only. Its query is
+ * at most a cache-busting timestamp, which a no-store answer does not need, so none is passed on;
+ * the answer is always JSON, never sniffed. Script code (`config.js`) is never fetched from
+ * PostHog; the SDK itself is a pinned copy.
  */
 function isSettingsRequest(request: Request, rest: string, token: string | undefined): boolean {
   if (token === undefined || token === '') return false;
@@ -106,18 +118,25 @@ function isSettingsRequest(request: Request, rest: string, token: string | undef
  */
 async function proxy(request: Request, rest: string, settings: AnalyticsSettings) {
   if (isSettingsRequest(request, rest, settings.token)) {
-    return forward(request, rest, settings, { method: 'GET' });
+    return forward(
+      rest,
+      settings,
+      { method: 'GET' },
+      { search: '', answerType: 'application/json' },
+    );
   }
   const refused = refusal(request, rest, settings.token);
   if (refused !== undefined) return status(refused);
   const body = await boundedBody(request, MAX_EVENT_BYTES);
   if (body === undefined) return status(413);
   const contentType = request.headers.get('Content-Type') ?? 'application/json';
-  return forward(request, rest, settings, {
-    method: 'POST',
-    body,
-    headers: { 'Content-Type': contentType },
-  });
+  const search = new URL(request.url).search;
+  return forward(
+    rest,
+    settings,
+    { method: 'POST', body, headers: { 'Content-Type': contentType } },
+    { search, answerType: undefined },
+  );
 }
 
 export function analyticsResponse(

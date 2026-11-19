@@ -14,6 +14,7 @@ import {
   PerspectiveCamera,
   type PlaneGeometry,
   Scene,
+  BufferGeometry,
   Material,
   Texture,
   WebGLRenderer,
@@ -251,10 +252,19 @@ function buildParts(options: RuntimeOptions, look: Look, assets: Assets): Parts 
   const camera = new PerspectiveCamera(FOV, 1, 0.05, 20);
   const rest = cameraDistance(CANVAS_UNITS, 1, FOV);
   camera.position.z = rest;
-  const { wood } = assets;
+  // Views of the cached images: this runtime owns (and frees) them, the images stay for the next.
+  const wood = { ...assets.wood, endGrain: assets.wood.endGrain.clone() };
   const { sizes, tiles, corner } = buildTiles(size, wood);
   const board = new Group();
-  const tray = { wood: assets.tray, felt: assets.felt, shadow: shadowTexture(9, 5) };
+  const tray = {
+    wood: {
+      map: assets.tray.map.clone(),
+      normalMap: assets.tray.normalMap.clone(),
+      roughnessMap: assets.tray.roughnessMap.clone(),
+    },
+    felt: { map: assets.felt.map.clone(), normalMap: assets.felt.normalMap.clone() },
+    shadow: shadowTexture(9, 5),
+  };
   board.add(trayGroup(tray, sizes.thickness));
   const confetti = confettiMesh(CONFETTI_COUNT);
   const dust = dustMesh(DUST_COUNT, dustTexture(), look.dust);
@@ -526,16 +536,50 @@ export interface RuntimeOptions {
   invalidate: () => void;
   /** True once the scene is no longer wanted: a build in progress stops and frees what it made. */
   cancelled: () => boolean;
+  /** What the board shows first: a picture is loaded before the runtime is handed over. */
+  skin: SceneSkin;
+  /**
+   * Called once the textures are ready, before the build touches the GL context: it resolves when
+   * the context is free for this build (true), or false when the build should give up.
+   */
+  claim: () => Promise<boolean>;
+}
+
+/** The build is no longer wanted, or its context is gone (3D switched off, or the GPU reset). */
+function given(options: RuntimeOptions): boolean {
+  return options.cancelled() || options.gl.isContextLost();
+}
+
+/** Everything the scene's objects hold: materials, the textures they show, geometries. */
+function heldBy(scene: Scene) {
+  const materials = new Set<Material>();
+  const textures = new Set<Texture>();
+  const geometries = new Set<{ dispose: () => void }>();
+  scene.traverse((object) => {
+    const geometry: unknown = Reflect.get(object, 'geometry');
+    if (geometry instanceof BufferGeometry) geometries.add(geometry);
+    const material: unknown = Reflect.get(object, 'material');
+    for (const one of Array.isArray(material) ? material : [material]) {
+      if (one instanceof Material) materials.add(one as Material);
+    }
+  });
+  for (const material of materials) {
+    for (const value of Object.values(material))
+      if (value instanceof Texture) textures.add(value as Texture);
+  }
+  return { materials, textures, geometries };
 }
 
 function disposeParts(parts: Parts, state: State): void {
+  // A picture still loading is dropped (and freed) when it arrives.
+  state.skinVersion += 1;
   for (const object of [...parts.tiles, parts.corner]) disposeTile(object);
-  parts.scene.traverse((object) => {
-    if ('geometry' in object && object.geometry instanceof Object && 'dispose' in object.geometry) {
-      (object.geometry as { dispose: () => void }).dispose();
-    }
-  });
+  const held = heldBy(parts.scene);
+  for (const texture of held.textures) texture.dispose();
+  for (const material of held.materials) material.dispose();
+  for (const geometry of held.geometries) geometry.dispose();
   state.picture?.dispose();
+  state.picture = undefined;
   parts.renderer.dispose();
 }
 
@@ -559,14 +603,23 @@ async function loadPicture(
   invalidate();
 }
 
-function setSkin(parts: Parts, state: State, options: RuntimeOptions, skin: SceneSkin): void {
+/** Shows `skin`; a new picture loads in the background, and the promise says when it has. */
+function setSkin(
+  parts: Parts,
+  state: State,
+  options: RuntimeOptions,
+  skin: SceneSkin,
+): Promise<void> {
   const before = state.skin;
   state.skin = skin;
   state.skinVersion += 1;
   const sameUrl = before.kind === 'picture' && skin.kind === 'picture' && before.url === skin.url;
-  if (skin.kind === 'picture' && !sameUrl)
-    void loadPicture(parts, state, skin.url, options.invalidate);
+  const loading =
+    skin.kind === 'picture' && !sameUrl
+      ? loadPicture(parts, state, skin.url, options.invalidate)
+      : Promise.resolve();
   repaint(parts, state);
+  return loading;
 }
 
 /** When the missing corner starts to fade in: now on a win, at once when shown solved or without motion. */
@@ -629,75 +682,88 @@ function frame(parts: Parts, state: State, options: RuntimeOptions, now: number)
   return busy;
 }
 
-/** Every texture the scene's materials show, once per image. */
-function sceneTextures(scene: Scene): Texture[] {
-  const found = new Map<unknown, Texture>();
-  scene.traverse((object) => {
-    const material: unknown = Reflect.get(object, 'material');
-    for (const one of Array.isArray(material) ? material : [material]) {
-      if (!(one instanceof Material)) continue;
-      for (const value of Object.values(one)) {
-        if (value instanceof Texture && !found.has(value.source))
-          found.set(value.source, value as Texture);
-      }
-    }
-  });
-  return [...found.values()];
+/** Whether every program `materials` need is compiled and linked, asked without blocking. */
+function programsReady(parts: Parts, materials: Iterable<Material>): boolean {
+  for (const material of materials) {
+    // three's own record of the material: the program it compiled, which can say if it is linked.
+    const held = parts.renderer.properties.get(material) as {
+      currentProgram?: { isReady?: () => boolean };
+    } | null;
+    const program = held?.currentProgram;
+    if (program?.isReady !== undefined && !program.isReady()) return false;
+  }
+  return true;
 }
 
 /**
  * Compiles the shaders an object at a time (the first of each kind builds its program), letting
- * the page run in between, then waits until the GPU has them ready without blocking on it.
+ * the page run in between, then waits until the GPU has them linked without blocking on it. Gives
+ * up (false) as soon as the build is no longer wanted: three's compileAsync would poll forever
+ * on a lost context.
  */
-async function compileInSlices(parts: Parts): Promise<void> {
+async function compileInSlices(parts: Parts, options: RuntimeOptions): Promise<boolean> {
   const { renderer, scene, camera } = parts;
+  const materials = new Set<Material>();
   for (const object of [...parts.board.children]) {
-    renderer.compile(object, camera, scene);
+    for (const material of renderer.compile(object, camera, scene)) materials.add(material);
     await pause();
+    if (given(options)) return false;
   }
-  await renderer.compileAsync(scene, camera);
+  while (!programsReady(parts, materials)) {
+    await pause();
+    if (given(options)) return false;
+  }
+  return true;
 }
 
 /**
  * Uploads the textures one at a time, letting the page run in between: uploading them all in the
  * first frame would be one long task on a slow phone.
  */
-async function uploadInSlices(parts: Parts): Promise<void> {
-  for (const texture of sceneTextures(parts.scene)) {
+async function uploadInSlices(parts: Parts, options: RuntimeOptions): Promise<boolean> {
+  const images = new Map<unknown, Texture>();
+  for (const texture of heldBy(parts.scene).textures) images.set(texture.source, texture);
+  for (const texture of images.values()) {
     parts.renderer.initTexture(texture);
     await pause();
+    if (given(options)) return false;
   }
+  return true;
+}
+
+/** The GL half of a build: the first skin (its picture loaded), the shaders, the uploads. */
+async function prepare(parts: Parts, state: State, options: RuntimeOptions): Promise<boolean> {
+  await setSkin(parts, state, options, options.skin);
+  if (given(options)) return false;
+  return (await compileInSlices(parts, options)) && (await uploadInSlices(parts, options));
 }
 
 /**
- * Builds the scene without blocking the page: the textures are generated in slices, the shaders
- * compile in the background (compileAsync), and only then is the runtime handed over. Undefined
- * when the scene was given up on (`cancelled`) while it was being built.
+ * Builds the scene without blocking the page: the textures are generated in slices, then, once
+ * `claim` hands it the GL context, the shaders compile and the textures upload in slices too, and
+ * only then is the runtime handed over. Undefined when the build was given up on (`cancelled`, or
+ * the context was lost) on the way; whatever it had made on the GPU by then is freed at once.
  */
 export async function createRuntime(options: RuntimeOptions): Promise<SceneRuntime | undefined> {
   const look = options.dark ? DARK_LOOK : LIGHT_LOOK;
   const assets = await loadAssets(look, options.size);
-  if (options.cancelled()) return undefined;
+  if (given(options) || !(await options.claim()) || given(options)) return undefined;
   const parts = buildParts(options, look, assets);
-  await pause();
   const state = newState(options.size);
-  repaint(parts, state);
-  await compileInSlices(parts);
-  await uploadInSlices(parts);
-  if (options.cancelled()) {
-    disposeParts(parts, state);
-    return undefined;
-  }
-  return runtimeOf(parts, state, options);
+  if (await prepare(parts, state, options)) return runtimeOf(parts, state, options);
+  disposeParts(parts, state);
+  return undefined;
 }
 
 function runtimeOf(parts: Parts, state: State, options: RuntimeOptions): SceneRuntime {
   return {
     setBoard: (board, finished, moves, now) => {
+      // A board of another size belongs to the scene being built to replace this one.
+      if (board.length !== state.size * state.size) return;
       setBoard(parts, state, options, { board, finished, moves, now });
     },
     setSkin: (skin) => {
-      setSkin(parts, state, options, skin);
+      void setSkin(parts, state, options, skin);
     },
     setTilt: (tilt) => {
       state.target = options.reducedMotion ? { x: 0, y: 0 } : tilt;

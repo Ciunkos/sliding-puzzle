@@ -9,7 +9,6 @@
 
 export const section = 'pf-card';
 export const heading = 'pf-heading';
-export const notice = 'pf-notice';
 export const row = 'pf-row';
 export const button = 'pf-button';
 export const input = 'pf-input';
@@ -49,7 +48,6 @@ export const css = `
   background: #fffaf0;
 }
 .pf-heading { font-size: 1.125rem; margin: 0 0 4px; overflow-wrap: anywhere; }
-.pf-notice { margin: 0 0 8px; }
 .pf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 0; }
 .pf-button {
   min-height: 44px;

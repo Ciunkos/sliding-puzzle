@@ -11,6 +11,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -42,7 +43,7 @@ import { BestResults, Menu, MenuSection, SizeChoice } from './menu.tsx';
 import { paletteStyle } from './palettes.ts';
 import { shownSkin } from './preferences.ts';
 import { type Size, sizeOf } from './rules.ts';
-import { SOUND_STYLES, SoundButton, SoundSettings } from './sound-button.tsx';
+import { SoundButton, SoundSettings } from './sound-button.tsx';
 import { css } from './styles.ts';
 import { useAnnouncement } from './use-announcement.ts';
 import { useGameEvents, useSkinEvents } from './use-feature-events.ts';
@@ -187,7 +188,16 @@ function Arena(props: {
 }): ReactElement {
   const { session } = props;
   const { game } = session;
-  const shake = useShake(game?.moves, game?.finished === true);
+  const shake = useShake(
+    game === undefined
+      ? undefined
+      : {
+          startedAt: game.startedAt,
+          size: game.state.board.length,
+          moves: game.moves,
+          finished: game.finished,
+        },
+  );
   return (
     <div className="sp-arena">
       <Stage
@@ -287,9 +297,13 @@ interface ScreenLook {
   retry: () => void;
 }
 
-function useScreenLook(choices: LookChoices): ScreenLook {
+/**
+ * `hasGame`: a game is on screen. The 3D board's surface is held only while there is one, so the
+ * next profile's game (the screen stays, the game goes and comes) gets a fresh surface.
+ */
+function useScreenLook(choices: LookChoices, hasGame: boolean): ScreenLook {
   const { look, photo } = choices;
-  const state = useSceneState(look.scene3d);
+  const state = useSceneState(look.scene3d && hasGame);
   const orientation = useOrientationTilt();
   const reducedMotion = useMedia('(prefers-reduced-motion: reduce)');
   const dark = useMedia('(prefers-color-scheme: dark)');
@@ -373,7 +387,9 @@ type MenuState = ReturnType<typeof useMenu>;
 
 /** What the player's actions do beyond the game itself: their sound, the wiggle, the menu. */
 function actionsOf(props: ScreenProps, puzzle: Puzzle, sound: Sound, menu: MenuState) {
+  // One sound per action, and only for an action that happens: none while a request runs.
   const pressed = (action: () => void) => () => {
+    if (puzzle.session.busy) return;
     sound.play('press');
     action();
   };
@@ -383,8 +399,9 @@ function actionsOf(props: ScreenProps, puzzle: Puzzle, sound: Sound, menu: MenuS
     }),
     reset: pressed(puzzle.session.reset),
     pickSize: (size: Size) => {
+      if (puzzle.session.busy) return;
+      menu.close({ quiet: true });
       sound.play('press');
-      menu.close();
       puzzle.startGame(size);
     },
     openMenu: () => {
@@ -402,13 +419,34 @@ function actionsOf(props: ScreenProps, puzzle: Puzzle, sound: Sound, menu: MenuS
 type Actions = ReturnType<typeof actionsOf>;
 
 /** The wiggle of a tile that could not move, and its knock. */
-function useNudge(sound: Sound): BoardHandlers {
+/** How long a wiggle lasts (styles.ts), with a little to spare: then it is over. */
+const NUDGE_MS = 320;
+
+/**
+ * The wiggle of a tile that could not move, and its knock. The wiggle is cleared once it has played
+ * and when another game or size comes, so nothing replays it (a remounted board, 3D switched off).
+ */
+function useNudge(sound: Sound, game: Game | undefined): BoardHandlers {
   const [nudge, setNudge] = useState<Nudge>(undefined);
+  const serial = useRef(0);
+  useEffect(() => {
+    setNudge(undefined);
+  }, [game?.startedAt, game?.state.board.length]);
+  useEffect(() => {
+    if (nudge === undefined) return undefined;
+    const timer = setTimeout(() => {
+      setNudge(undefined);
+    }, NUDGE_MS);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [nudge]);
   return {
     nudge,
     onBlocked: (tile) => {
       sound.play('blocked');
-      if (tile !== undefined) setNudge((last) => ({ tile, serial: (last?.serial ?? 0) + 1 }));
+      serial.current += 1;
+      if (tile !== undefined) setNudge({ tile, serial: serial.current });
     },
   };
 }
@@ -538,17 +576,18 @@ function useScreen(props: ScreenProps) {
   const puzzle = usePuzzle(props);
   const sound = useSound(puzzle.session.game);
   const choices = useSoundedLook(props.nickname, sound);
-  const screen = useScreenLook(choices);
+  const screen = useScreenLook(choices, puzzle.session.game !== undefined);
   const menu = useMenu(() => {
     sound.play('menu-close');
   });
-  useSkinEvents(choices.look.skin, props.onEvent);
+  useSkinEvents(choices.look.skin, props.nickname, props.onEvent);
   // Another profile is another game: the menu that switched to it closes.
   useEffect(() => {
     menu.close();
   }, [props.nickname]);
   const actions = actionsOf(props, puzzle, sound, menu);
-  return { puzzle, sound, choices, screen, menu, actions, board: useNudge(sound) };
+  const board = useNudge(sound, puzzle.session.game);
+  return { puzzle, sound, choices, screen, menu, actions, board };
 }
 
 function PuzzleScreen(props: ScreenProps): ReactElement {
@@ -558,7 +597,7 @@ function PuzzleScreen(props: ScreenProps): ReactElement {
     // No heading of its own: the shell has the page's <h1>; the menu and the profile have theirs.
     // The page behind the board takes the picture's colours (palettes.ts).
     <section className="sp-puzzle" aria-label="Puzzle" style={paletteStyle(screen.board.skin)}>
-      <style>{SOUND_STYLES + css}</style>
+      <style>{css}</style>
       <Hud
         menu={menu}
         puzzle={puzzle}

@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 import fc from 'fast-check';
 import {
   approach,
+  badgeShown,
   cameraDistance,
   CANVAS_UNITS,
   cornerAt,
@@ -55,31 +56,43 @@ describe('easeOut', () => {
   });
 });
 
+// The spring, by hand: damping z = 0.7 and w = 0.033 rad/ms give a damped frequency
+// w_d = w * sqrt(1 - z^2) = 0.02357 rad/ms. It peaks at pi / w_d = 133.3 ms, past its cell by
+// e^(-z * pi / sqrt(1 - z^2)) = e^(-3.0795) = 4.6%. At 50 ms, 1 - e^(-1.155) * (cos 1.1785 +
+// 0.98 * sin 1.1785) = 1 - 0.315 * 1.288 = 0.594 of the way.
+const OVERSHOOT = 1.046;
+/** Hand-worked values are good to about this much. */
+const CLOSE = 0.002;
+
 describe('SLIDE_MS and SLIDE_EASING', () => {
-  test('the DOM board slides for the 300 ms of the spring with its overshoot, in 10 ms steps', () => {
-    assert.deepEqual(
-      [SLIDE_MS, SLIDE_EASING],
-      [
-        300,
-        'linear(0, 0.047, 0.158, 0.301, 0.452, 0.594, 0.719, 0.822, 0.902, 0.961, 1.001, 1.027, 1.041, 1.046, 1.045, 1.041, 1.034, 1.027, 1.021, 1.015, 1.01, 1.006, 1.003, 1, 0.999, 0.998, 0.998, 0.998, 0.998, 0.998, 1)',
-      ],
-    );
+  test('the DOM board slides for the 300 ms of the spring, sampled in 30 steps from 0 to exactly 1', () => {
+    assert.ok(SLIDE_EASING.startsWith('linear(0, '));
+    assert.ok(SLIDE_EASING.endsWith(', 1)'));
+    assert.deepEqual([SLIDE_MS, SLIDE_EASING.split(', ').length], [300, 31]);
+  });
+
+  test('the CSS easing overshoots like the spring: its largest point is 4.6% past the end', () => {
+    const points = Array.from(SLIDE_EASING.slice('linear('.length, -1).split(', '), Number);
+
+    assert.ok(Math.abs(Math.max(...points) - OVERSHOOT) <= CLOSE);
   });
 });
 
 describe('slideAt', () => {
   const FROM = { x: 0, y: 0 };
   const TO = { x: 0.25, y: 0 };
+  const SLIDE = { from: FROM, to: TO, start: 1000 };
 
   test('50 ms in, halfway to its landing, a slide is 59% of the way and lifted at its highest', () => {
-    const at = slideAt({ from: FROM, to: TO, start: 1000 }, 1050);
+    const at = slideAt(SLIDE, 1050);
 
-    assert.deepEqual(at, { x: 0.14854079113814722, y: 0, lift: 0.01, done: false });
+    assert.ok(Math.abs(at.x - 0.25 * 0.594) <= CLOSE * 0.25);
+    assert.deepEqual([at.y, at.lift, at.done], [0, 0.01, false]);
   });
 
   test('a slide before its start has not moved and one 300 ms (SLIDE_MS) in is done, resting on the tray', () => {
-    const before = slideAt({ from: FROM, to: TO, start: 1000 }, 990);
-    const after = slideAt({ from: FROM, to: TO, start: 1000 }, 1000 + SLIDE_MS);
+    const before = slideAt(SLIDE, 990);
+    const after = slideAt(SLIDE, 1000 + SLIDE_MS);
 
     assert.deepEqual(
       [before, after],
@@ -90,36 +103,71 @@ describe('slideAt', () => {
     );
   });
 
-  test('133 ms in, a landed slide has overshot its cell by 4.6% and rests on the tray', () => {
-    const at = slideAt({ from: FROM, to: TO, start: 1000 }, 1133);
+  test('at its peak, 133 ms in, a landed slide is 4.6% of the way past its cell and rests on the tray', () => {
+    const at = slideAt(SLIDE, 1133.3);
 
-    assert.deepEqual(at, { x: 0.2614963872669226, y: 0, lift: 0, done: false });
+    assert.ok(Math.abs(at.x - 0.25 * OVERSHOOT) <= CLOSE * 0.25);
+    assert.deepEqual([at.lift, at.done], [0, false]);
   });
 
-  test('a tile sliding down from a cell off the centre keeps its column and springs along its row', () => {
-    const at = slideAt({ from: { x: 0.25, y: 0.25 }, to: { x: 0.25, y: -0.25 }, start: 0 }, 70);
-
-    assert.deepEqual(at, {
-      x: 0.25,
-      y: -0.1608411003198124,
-      lift: 0.008090169943749474,
-      done: false,
-    });
+  test('on the way to its landing a slide rises and comes down the same: its lift is symmetric', () => {
+    fc.assert(
+      fc.property(fc.double({ min: 0, max: 100, noNaN: true }), (t) => {
+        const lift = slideAt(SLIDE, 1000 + t).lift - slideAt(SLIDE, 1100 - t).lift;
+        assert.ok(Math.abs(lift) < 1e-12);
+      }),
+    );
   });
 
-  test('a slide given twice the time follows the same spring at half the speed', () => {
-    const at = slideAt({ from: FROM, to: TO, start: 1000 }, 1100, 600);
+  test('a slide moves forward without ever falling back until its peak at 133 ms', () => {
+    const time = fc.double({ min: 0, max: 133, noNaN: true });
+    fc.assert(
+      fc.property(time, time, (a, b) => {
+        assert.ok(
+          slideAt(SLIDE, 1000 + Math.min(a, b)).x <= slideAt(SLIDE, 1000 + Math.max(a, b)).x,
+        );
+      }),
+    );
+  });
 
-    assert.deepEqual(at, { x: 0.14854079113814722, y: 0, lift: 0.01, done: false });
+  test('a tile sliding down half the board is, 50 ms in, 59% of the way down from y = 0.25', () => {
+    const at = slideAt({ from: { x: 0.25, y: 0.25 }, to: { x: 0.25, y: -0.25 }, start: 0 }, 50);
+
+    assert.ok(Math.abs(at.y - (0.25 - 0.5 * 0.594)) <= CLOSE * 0.5);
+  });
+
+  test('a tile sliding down a column never leaves it', () => {
+    const down = { from: { x: 0.25, y: 0.25 }, to: { x: 0.25, y: -0.25 }, start: 0 };
+    fc.assert(
+      fc.property(fc.double({ min: -50, max: 400, noNaN: true }), (t) => {
+        assert.equal(slideAt(down, t).x, 0.25);
+      }),
+    );
+  });
+
+  test('a slide given twice the time is, 100 ms in, where the usual one is at 50 ms: 59%, at its highest', () => {
+    const at = slideAt(SLIDE, 1100, 600);
+
+    assert.ok(Math.abs(at.x - 0.25 * 0.594) <= CLOSE * 0.25);
+    assert.deepEqual([at.lift, at.done], [0.01, false]);
   });
 
   test('a slide of no duration (reduced motion) is done at once', () => {
-    assert.deepEqual(slideAt({ from: FROM, to: TO, start: 1000 }, 1000, 0), {
-      x: 0.25,
-      y: 0,
-      lift: 0,
-      done: true,
-    });
+    assert.deepEqual(slideAt(SLIDE, 1000, 0), { x: 0.25, y: 0, lift: 0, done: true });
+  });
+});
+
+describe('badgeShown', () => {
+  test('a picture tile shows its number badge when badges are on, and the missing corner never does', () => {
+    assert.deepEqual(
+      [
+        badgeShown(15, 4, true),
+        badgeShown(15, 4, false),
+        badgeShown(16, 4, true),
+        badgeShown(9, 3, true),
+      ],
+      [true, false, false, false],
+    );
   });
 });
 

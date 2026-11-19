@@ -3,6 +3,7 @@ import { describe, test } from 'node:test';
 import fc from 'fast-check';
 import {
   BAR_SECONDS,
+  catchUp,
   frequencyOf,
   LOOP_BARS,
   melody,
@@ -172,5 +173,23 @@ describe('music', () => {
       pad: { wave: 'triangle', attack: 1.6, release: 2.4, detuneCents: 7 },
     });
     assert.deepEqual(ROOM, { seconds: 3.2, fade: 3, wet: 0.35, dry: 0.75, lowpass: 2200 });
+  });
+});
+
+describe('catchUp', () => {
+  test('a schedule that is on time is left as it is', () => {
+    assert.deepEqual(catchUp({ bar: 7, next: 30 }, 29, 4), { bar: 7, next: 30 });
+  });
+
+  test('a bar that should have started just now still plays', () => {
+    assert.deepEqual(catchUp({ bar: 7, next: 30 }, 30, 4), { bar: 7, next: 30 });
+  });
+
+  test('bars missed while the timer was held up are skipped to the next bar boundary', () => {
+    assert.deepEqual(catchUp({ bar: 7, next: 30 }, 39, 4), { bar: 10, next: 42 });
+  });
+
+  test('a schedule just behind skips one bar, never playing in the past', () => {
+    assert.deepEqual(catchUp({ bar: 0, next: 10 }, 10.5, 4), { bar: 1, next: 14 });
   });
 });

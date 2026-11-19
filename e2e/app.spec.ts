@@ -6,6 +6,7 @@ import { board, currentNickname, gameMessage, moves, openProfile, tile } from '.
 import { AFTER_TILE_11, KNOWN_BOARD } from './support/boards.ts';
 import { expect, test } from './support/harness.ts';
 import { firstVisitLayoutShift } from './support/layout-shift.ts';
+import { menu, menuButton } from './support/menu.ts';
 import {
   controllerScript,
   fetchFromPage,
@@ -152,4 +153,16 @@ test('a new version is offered, and Reload switches to it', async ({ page }) => 
     await expect(board(page)).toBeVisible();
     expect(await controllerScript(page)).toMatch(/\/sliding-puzzle\/sw\.js\?next$/);
   });
+});
+
+test('while a new version is offered, the corner buttons and the actions stay usable', async ({
+  page,
+}) => {
+  await openInstalled(page, 'app-update-corners');
+  await publishNewWorker(page);
+  await expect(page.getByTestId('update-notice')).toContainText('A new version is ready.');
+
+  await menuButton(page).click();
+
+  await expect(menu(page)).toBeVisible();
 });

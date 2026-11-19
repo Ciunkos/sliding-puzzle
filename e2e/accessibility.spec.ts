@@ -10,7 +10,7 @@ import {
 } from './support/app.ts';
 import { expect, expectAccessible, test, uniqueNickname } from './support/harness.ts';
 
-/** The first visit: the profile bar with the switcher open, above the game. */
+/** The first visit: the toast with the notice, then the menu open on the profile switcher. */
 async function checkFirstVisit(page: Page): Promise<void> {
   await page.goto('/sliding-puzzle');
   await expect(profileNotice(page)).toBeVisible();

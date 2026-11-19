@@ -157,7 +157,6 @@ export const css = `
   align-items: center;
   gap: 8px;
 }
-.sp-corner-slot { width: 44px; height: 44px; }
 .sp-status { position: relative; text-align: center; }
 .sp-counts {
   display: inline-flex;
@@ -453,7 +452,6 @@ export const css = `
 .sp-button:focus-visible {
   box-shadow: 0 0 0 2px var(--sp-ring-inner), 0 0 0 5px var(--sp-ring-outer);
 }
-.sp-label { font-weight: 600; }
 .sp-hint { margin: 6px 0 0; color: var(--sp-muted); font-size: 14px; }
 /* The 3D board draws the tiles: the buttons stay exactly in place, see-through, so the focus
    ring (a box-shadow, not opacity) still shows on the tile it belongs to. */
@@ -462,8 +460,46 @@ export const css = `
 .sp-layered .sp-tile:focus-visible .sp-face {
   box-shadow: 0 0 0 2px var(--sp-ring-inner), 0 0 0 5px var(--sp-ring-outer);
 }
-/* The speaker in the top-right corner, crafted like the other HUD buttons (overrides SOUND_STYLES,
-   which comes first). */
+/* The sound controls (sound-button.tsx): the corner speaker and the menu's two switches. */
+.sp-sound-button {
+  display: inline-flex; align-items: center; justify-content: center;
+  inline-size: 44px; block-size: 44px; padding: 0; border-radius: 50%;
+  border: 1px solid var(--sp-line, currentColor);
+  background: var(--sp-button, transparent); color: var(--sp-button-text, inherit);
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+.sp-sound-button[aria-pressed="false"] { color: var(--sp-muted, inherit); }
+.sp-sound-button:focus-visible {
+  outline: 3px solid var(--sp-ring-outer, currentColor); outline-offset: 2px;
+}
+.sp-sound-icon { display: block; }
+.sp-sound-settings { display: grid; gap: 0.5rem; }
+.sp-sound-switch {
+  display: flex; align-items: center; gap: 0.75rem; min-block-size: 44px; cursor: pointer;
+}
+.sp-sound-switch input {
+  appearance: none; -webkit-appearance: none; margin: 0; flex: none;
+  inline-size: 2.75rem; block-size: 1.5rem; border-radius: 0.75rem; position: relative;
+  border: 1px solid var(--sp-line, currentColor); background: var(--sp-well, transparent);
+  cursor: pointer; transition: background-color 0.15s;
+}
+.sp-sound-switch input::after {
+  content: ""; position: absolute; inset-block-start: 0.125rem; inset-inline-start: 0.125rem;
+  inline-size: 1.125rem; block-size: 1.125rem; border-radius: 50%;
+  background: var(--sp-button-text, currentColor); transition: transform 0.15s;
+}
+.sp-sound-switch input:checked { background: var(--sp-tile, currentColor); }
+.sp-sound-switch input:checked::after {
+  transform: translateX(1.25rem); background: var(--sp-tile-text, #fff);
+}
+.sp-sound-switch input:focus-visible {
+  outline: 3px solid var(--sp-ring-outer, currentColor); outline-offset: 2px;
+}
+.sp-sound-note { margin: 0; font-size: 0.875rem; color: var(--sp-muted, inherit); }
+@media (prefers-reduced-motion: reduce) {
+  .sp-sound-switch input, .sp-sound-switch input::after { transition: none; }
+}
+/* The speaker crafted like the other HUD buttons. */
 .sp-sound-button {
   border: 2px solid var(--sp-line);
   box-shadow: 0 2px 0 rgb(40 20 5 / 0.25), 0 4px 12px rgb(40 20 5 / 0.12);

@@ -2,7 +2,7 @@
 import { useEffect, useRef } from 'react';
 import type { FeatureEvent, SavedGame } from '../game/client.tsx';
 import type { PuzzleState } from './definition.ts';
-import { gameEvents, skinChanged } from './events.ts';
+import { gameEvents, type ShownSkin, skinChosen } from './events.ts';
 import type { SkinId } from './preferences.ts';
 
 type OnEvent = ((event: FeatureEvent) => void) | undefined;
@@ -35,12 +35,12 @@ export function useGameEvents(
   };
 }
 
-/** Reports a skin the player chose; the one read when the screen opens is not a change. */
-export function useSkinEvents(skin: SkinId, onEvent: OnEvent): void {
-  const previous = useRef<SkinId | undefined>(undefined);
+/** Reports a skin the player chose; the one read on opening, or another profile's, is not one. */
+export function useSkinEvents(skin: SkinId, nickname: string, onEvent: OnEvent): void {
+  const previous = useRef<ShownSkin | undefined>(undefined);
   useEffect(() => {
-    const event = skinChanged(previous.current, skin);
-    previous.current = skin;
+    const event = skinChosen(previous.current, { skin, nickname });
+    previous.current = { skin, nickname };
     if (event !== undefined) onEvent?.(event);
-  }, [skin, onEvent]);
+  }, [skin, nickname, onEvent]);
 }

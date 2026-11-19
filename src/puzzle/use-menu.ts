@@ -1,7 +1,7 @@
 // The menu dialog's browser wiring: showModal (focus moves in, the page behind is inert, Escape
 // closes) and close; when it closes, however it closed, focus goes back to the menu button. Tab
 // and Shift+Tab wrap around inside the open menu instead of leaving for the browser's toolbar.
-import { useEffect, useRef, useState } from 'react';
+import { type RefObject, useEffect, useRef, useState } from 'react';
 
 const FOCUSABLE = 'button, summary, input, select, textarea, a[href], [tabindex="0"]';
 
@@ -19,31 +19,45 @@ function wrapTab(dialog: HTMLDialogElement, event: KeyboardEvent): void {
   (event.shiftKey ? last : first)?.focus();
 }
 
-/** `onClosed` hears every close (button, Escape, backdrop, a choice that closes it). */
+/** The dialog's close event (however it closed) and Tab wrapping, for the page's lifetime. */
+function useDialogEvents(dialog: RefObject<HTMLDialogElement | null>, onClose: () => void): void {
+  const latest = useRef(onClose);
+  latest.current = onClose;
+  useEffect(() => {
+    const element = dialog.current;
+    if (element === null) return undefined;
+    const closed = () => {
+      latest.current();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      wrapTab(element, event);
+    };
+    element.addEventListener('close', closed);
+    element.addEventListener('keydown', onKeyDown);
+    return () => {
+      element.removeEventListener('close', closed);
+      element.removeEventListener('keydown', onKeyDown);
+    };
+  }, [dialog]);
+}
+
+/**
+ * `onClosed` hears every close (button, Escape, backdrop, a profile switch) except a quiet one: a
+ * choice that closes the menu as part of what it does, and makes its own sound.
+ */
 export function useMenu(onClosed: () => void = () => undefined) {
   const dialog = useRef<HTMLDialogElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const closed = useRef(onClosed);
   closed.current = onClosed;
-  useEffect(() => {
-    const element = dialog.current;
-    if (element === null) return undefined;
-    const onClose = () => {
-      setOpen(false);
-      button.current?.focus();
-      closed.current();
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      wrapTab(element, event);
-    };
-    element.addEventListener('close', onClose);
-    element.addEventListener('keydown', onKeyDown);
-    return () => {
-      element.removeEventListener('close', onClose);
-      element.removeEventListener('keydown', onKeyDown);
-    };
-  }, []);
+  const quiet = useRef(false);
+  useDialogEvents(dialog, () => {
+    setOpen(false);
+    button.current?.focus();
+    if (!quiet.current) closed.current();
+    quiet.current = false;
+  });
   return {
     dialog,
     button,
@@ -54,8 +68,11 @@ export function useMenu(onClosed: () => void = () => undefined) {
       element.showModal();
       setOpen(true);
     },
-    close: () => {
-      dialog.current?.close();
+    close: (options: { quiet?: boolean } = {}) => {
+      const element = dialog.current;
+      if (element?.open !== true) return;
+      quiet.current = options.quiet === true;
+      element.close();
     },
   };
 }

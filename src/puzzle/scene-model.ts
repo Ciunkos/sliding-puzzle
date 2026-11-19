@@ -182,3 +182,8 @@ export function cornerAt(t: number): { opacity: number; drop: number } {
   const eased = easeOut(t / CORNER_MS);
   return { opacity: eased, drop: CORNER_DROP * (1 - eased) };
 }
+
+/** Whether tile `tile` shows its number badge on a picture: never the missing corner, filled in on a win. */
+export function badgeShown(tile: number, size: Size, badges: boolean): boolean {
+  return badges && tile < size * size;
+}

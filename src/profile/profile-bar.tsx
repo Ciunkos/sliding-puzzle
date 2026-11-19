@@ -82,6 +82,8 @@ function SwitchProfile(props: {
 }
 
 export function ProfileBar(props: {
+  /** Its heading's level: 3 inside a menu that has its own level 2 heading, 2 on a page. */
+  level?: 2 | 3;
   nickname: string;
   /** The full URL of this profile, to share. */
   shareUrl: string;
@@ -90,13 +92,14 @@ export function ProfileBar(props: {
 }): ReactElement {
   const headingId = useId();
   const copy = useCopyResult(props.shareUrl);
+  const Heading = props.level === 3 ? 'h3' : 'h2';
   return (
     <section aria-labelledby={headingId} className={styles.bar}>
       {/* The profile's stylesheet; the bar is on screen whenever the profile's error can be. */}
       <style>{styles.css}</style>
-      <h2 id={headingId} className={styles.barHeading}>
+      <Heading id={headingId} className={styles.barHeading}>
         Playing as <span data-testid="current-profile">{props.nickname}</span>
-      </h2>
+      </Heading>
       <p data-testid="menu-profile-notice" className={styles.barNotice}>
         There is no login. Anyone with this link can play this profile.
       </p>

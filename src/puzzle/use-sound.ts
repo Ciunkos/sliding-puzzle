@@ -7,7 +7,15 @@
 // key press that has something to play. It is suspended while the page is hidden. Where Web Audio
 // is missing every call is a no-op. Gain budget: see sound-model.ts.
 import { useEffect, useRef, useState } from 'react';
-import { BAR_SECONDS, musicBar, type NoteEvent, ROOM, VOICES } from './music-model.ts';
+import {
+  BAR_SECONDS,
+  catchUp,
+  type MusicPosition,
+  musicBar,
+  type NoteEvent,
+  ROOM,
+  VOICES,
+} from './music-model.ts';
 import { createRng } from './rng.ts';
 import {
   type EffectRecipe,
@@ -220,13 +228,17 @@ interface Engine {
   music: MusicRun | undefined;
 }
 
-/** Schedules bars whose start is within LOOKAHEAD; a suspended clock schedules nothing. */
+/**
+ * Schedules bars whose start is within LOOKAHEAD; a suspended clock schedules nothing. Bars missed
+ * while the timer was held up are skipped (catchUp), never played late all at once.
+ */
 function startMusic(engine: Engine): MusicRun {
   const { context } = engine;
   const output = new GainNode(context, { gain: 1 });
   output.connect(engine.mixer.music);
-  const position = { bar: 0, next: context.currentTime + 0.1 };
+  let position: MusicPosition = { bar: 0, next: context.currentTime + 0.1 };
   const tick = () => {
+    position = catchUp(position, context.currentTime, BAR_SECONDS);
     while (position.next < context.currentTime + LOOKAHEAD) {
       playBar(context, output, position.bar, position.next);
       position.bar += 1;

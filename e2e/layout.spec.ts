@@ -11,8 +11,9 @@ import {
   SMALL_PHONE,
   TABLET,
   TALL_PHONE,
+  targetSize,
 } from './support/layout.ts';
-import { menuButton } from './support/menu.ts';
+import { menuButton, openMenu } from './support/menu.ts';
 
 test('on a 320 x 568 phone the whole game is on one screen that does not scroll', async ({
   page,
@@ -82,4 +83,19 @@ test('a short page such as an unusable profile name keeps the usage switch on sc
   await expect(invalidProfile(page)).toBeVisible();
 
   await expect(page.getByTestId('usage-statistics')).toBeInViewport({ ratio: 1 });
+});
+
+test('on a small phone the corner buttons and the sound switches are big enough to tap', async ({
+  page,
+  request,
+}) => {
+  await page.setViewportSize(SMALL_PHONE);
+  // Without motion: the menu is measured at its size, not while it springs open.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await startKnownGame(page, request, uniqueNickname());
+  expect(await targetSize(menuButton(page))).toBeGreaterThanOrEqual(44);
+  expect(await targetSize(page.getByTestId('sound-toggle'))).toBeGreaterThanOrEqual(44);
+  await openMenu(page);
+
+  expect(await targetSize(page.locator('.sp-sound-switch').first())).toBeGreaterThanOrEqual(44);
 });

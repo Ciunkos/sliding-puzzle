@@ -15,7 +15,7 @@ import {
   Vector2,
 } from 'three';
 import type { Size } from './rules.ts';
-import { tileUv } from './scene-model.ts';
+import { badgeShown, tileUv } from './scene-model.ts';
 import { bodyGeometry, faceGeometry, type TileSizes } from './use-three-parts.ts';
 import { badgeFace, type NumberAtlas, type PlankTextures, WINDOW_SHARE } from './use-tile-faces.ts';
 import { grainWindow, windowTransform, type WoodTheme } from './wood.ts';
@@ -34,6 +34,8 @@ export interface TileObject {
   shadow: Mesh<BufferGeometry, MeshBasicMaterial>;
   /** The cube's own textures (views of shared images), freed with it. */
   owned: Texture[];
+  /** Its number badge, drawn the first time a picture with numbers is shown. */
+  badgeMap?: Texture;
 }
 
 /** The wood every tile of one board is cut from. */
@@ -185,12 +187,10 @@ export type Paint =
   | { kind: 'numbers'; wood: TileWood; won: boolean }
   | { kind: 'picture'; wood: TileWood; picture: Texture | undefined; badges: boolean };
 
-const badgeCache = new Map<number, Texture>();
-
-function cachedBadge(tile: number): Texture {
-  const cached = badgeCache.get(tile) ?? badgeFace(tile);
-  badgeCache.set(tile, cached);
-  return cached;
+/** A tile's badge, drawn once per board (the board's runtime frees it with the rest). */
+function cachedBadge(object: TileObject): Texture {
+  object.badgeMap ??= badgeFace(object.tile);
+  return object.badgeMap;
 }
 
 /** A tile's own view of the shared picture: the same image, offset to its square. */
@@ -230,8 +230,8 @@ export function paintTile(object: TileObject, size: Size, paint: Paint): void {
     object.badge.visible = false;
   } else {
     paintPicture(object, size, paint);
-    object.badge.material.map = cachedBadge(object.tile);
-    object.badge.visible = paint.badges;
+    object.badge.material.map = cachedBadge(object);
+    object.badge.visible = badgeShown(object.tile, size, paint.badges);
   }
   object.number.visible = paint.kind === 'numbers';
   // The win's glow brightens the face's own colours instead of washing them out with white.
@@ -240,12 +240,9 @@ export function paintTile(object: TileObject, size: Size, paint: Paint): void {
   object.badge.material.needsUpdate = true;
 }
 
+/** Frees the tile's own textures; its materials and geometry go with the rest of the scene. */
 export function disposeTile(object: TileObject): void {
   dropSlice(object);
-  for (const material of new Set(object.body.material)) material.dispose();
   for (const texture of object.owned) texture.dispose();
-  object.face.material.dispose();
-  object.number.material.dispose();
-  object.badge.material.dispose();
-  object.shadow.material.dispose();
+  object.badgeMap?.dispose();
 }

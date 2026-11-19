@@ -57,3 +57,21 @@ export function skinChanged(
 export function soundChanged(on: boolean): FeatureEvent {
   return { name: 'sound_changed', properties: { on } };
 }
+
+/** The skin on screen for a profile. */
+export interface ShownSkin {
+  skin: SkinId;
+  nickname: string;
+}
+
+/**
+ * `skin_changed` for a skin the player chose: the same profile, another skin. Switching profile is
+ * not a choice, even when that profile starts on another picture (preferences.ts startLook).
+ */
+export function skinChosen(
+  previous: ShownSkin | undefined,
+  current: ShownSkin,
+): FeatureEvent | undefined {
+  if (previous?.nickname !== current.nickname) return undefined;
+  return skinChanged(previous.skin, current.skin);
+}

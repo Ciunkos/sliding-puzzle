@@ -1,5 +1,5 @@
-// "A new version is ready": a small bar over the top of the screen, without moving the page (the
-// page is exactly one screen). Nothing reloads until the player presses Reload.
+// "A new version is ready": a compact pill near the bottom of the screen, above a game's bottom row,
+// so it covers none of the corner buttons and moves nothing (the page is exactly one screen). Nothing reloads until the player presses Reload.
 import type { ReactElement } from 'react';
 import { useServiceWorker } from './use-service-worker.ts';
 
@@ -7,15 +7,24 @@ const CSS = `
 .update-notice {
   position: fixed;
   z-index: 40;
-  inset: 0 0 auto;
+  left: 50%;
+  /* Above a game's bottom row (its 44px buttons and the screen's margin), clear of its corners. */
+  bottom: calc(max(10px, env(safe-area-inset-bottom)) + 3.75rem);
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100vw - 24px);
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   align-items: center;
-  gap: 0.5rem 1rem;
-  padding: calc(0.5rem + env(safe-area-inset-top)) 1rem 0.5rem;
+  gap: 0.25rem 0.75rem;
+  padding: 0.25rem 0.25rem 0.25rem 1rem;
+  border-radius: 1.5rem;
   background: #111;
   color: #fff;
+  font-family: system-ui, sans-serif;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.3);
+  transform: translateX(-50%);
 }
 .update-notice p { margin: 0; }
 .update-notice button {
@@ -23,7 +32,7 @@ const CSS = `
   font: inherit;
   padding: 0.5rem 1rem;
   border: 2px solid #fff;
-  border-radius: 6px;
+  border-radius: 999px;
   background: #fff;
   color: #111;
   cursor: pointer;

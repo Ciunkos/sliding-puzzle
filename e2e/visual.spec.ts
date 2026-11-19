@@ -137,4 +137,34 @@ test('a tile that cannot move wiggles when it is tapped, and nothing moves', asy
 
   await expect(tile(page, 1)).toHaveAttribute('data-nudge', /^[ab]$/);
   await expect(moves(page)).toHaveText('Moves: 0');
+  await expect(page.locator('[data-nudge]')).toHaveCount(0);
+});
+
+test('an arrow key that moves nothing wiggles no tile, even held down', async ({
+  page,
+  request,
+}) => {
+  await startKnownGame(page, request, uniqueNickname());
+  await tile(page, 1).focus();
+
+  // The blank is on the bottom row: nothing is below it to slide up.
+  await page.keyboard.down('ArrowUp');
+  await page.keyboard.down('ArrowUp');
+  await page.keyboard.up('ArrowUp');
+
+  await expect(moves(page)).toHaveText('Moves: 0');
+  await expect(page.locator('[data-nudge]')).toHaveCount(0);
+});
+
+test('the shake of a move is over once it has played, so nothing replays it later', async ({
+  page,
+  request,
+}) => {
+  await startKnownGame(page, request, uniqueNickname());
+  await switch3d(page);
+
+  await tile(page, 11).click();
+
+  await expect(page.locator('[data-shake]')).toHaveCount(1);
+  await expect(page.locator('[data-shake]')).toHaveCount(0);
 });

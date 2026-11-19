@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { SavedGame } from '../game/index.ts';
 import { grid } from '../test-support/grid.ts';
-import { gameEvents, skinChanged, soundChanged } from './events.ts';
+import { gameEvents, skinChanged, soundChanged, skinChosen } from './events.ts';
 import type { PuzzleState } from './index.ts';
 
 const SOLVED_4 = grid`
@@ -170,5 +170,25 @@ describe('soundChanged', () => {
         { name: 'sound_changed', properties: { on: false } },
       ],
     );
+  });
+});
+
+describe('skinChosen', () => {
+  test('a picture chosen on the same profile is reported', () => {
+    assert.deepEqual(
+      skinChosen({ skin: 'numbers', nickname: 'ada-one' }, { skin: 'rocket', nickname: 'ada-one' }),
+      { name: 'skin_changed', properties: { kind: 'picture' } },
+    );
+  });
+
+  test('another profile with its own start picture is not a choice', () => {
+    assert.equal(
+      skinChosen({ skin: 'cat', nickname: 'ada-one' }, { skin: 'rocket', nickname: 'ada-two' }),
+      undefined,
+    );
+  });
+
+  test('the look read when the screen opens is not a choice', () => {
+    assert.equal(skinChosen(undefined, { skin: 'rocket', nickname: 'ada-one' }), undefined);
   });
 });

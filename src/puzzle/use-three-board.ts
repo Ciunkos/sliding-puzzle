@@ -1,5 +1,5 @@
-// Runs the 3D board inside its wrapper element: creates the runtime on the probed canvas, feeds it
-// the game's state, and draws on demand. A frame is requested (invalidate) only when something
+// Runs the 3D board inside its wrapper element: builds the runtime on the probed canvas (a new one
+// for a new size or theme, swapped in once ready), feeds it the game's state, and draws on demand. A frame is requested (invalidate) only when something
 // changes or still moves; an idle board draws nothing. Browser wiring (named use-*.ts, so the
 // mutation run skips it): it needs WebGL, a DOM and animation frames.
 import { type RefObject, useEffect, useRef, useState } from 'react';
@@ -60,21 +60,32 @@ function demandLoop(draw: (now: number) => boolean, onFirst: () => void) {
   const invalidate = () => {
     if (frame === 0 && !stopped) frame = requestAnimationFrame(tick);
   };
+  /** Draws at once, in this task: after a resize, so no cleared canvas is ever shown. */
+  const drawNow = () => {
+    if (stopped) return;
+    cancelAnimationFrame(frame);
+    tick(performance.now());
+  };
   const stop = () => {
     stopped = true;
     cancelAnimationFrame(frame);
   };
-  return { invalidate, stop };
+  return { invalidate, drawNow, stop };
 }
 
-/** Connects a built runtime to `wrapper`: its canvas, size, context loss and frames. */
-function attach(
-  wrapper: HTMLDivElement,
-  runtime: SceneRuntime,
-  surface: SceneSurface,
-  latest: RefObject<Board3DProps>,
-) {
-  const { canvas } = surface;
+/** A runtime on screen: what the feeds talk to, and how to take it down. */
+interface Shown {
+  live: Live;
+  /** Stops drawing and frees the runtime; its last frame stays on the canvas. */
+  detach: () => void;
+}
+
+/**
+ * Puts a built runtime on screen in one task: it gets the current board and skin, the canvas its
+ * size, and draws its first frame at once, so the hand-over from the scene before shows no gap.
+ */
+function show(wrapper: HTMLDivElement, runtime: SceneRuntime, latest: RefObject<Board3DProps>) {
+  const props = latest.current;
   const loop = demandLoop(
     (now) => runtime.frame(now),
     () => {
@@ -82,77 +93,144 @@ function attach(
       latest.current.onReady();
     },
   );
-  wrapper.append(canvas);
-  const lost = () => {
-    latest.current.onLost();
+  runtime.setBoard(props.board, props.finished, props.moves, performance.now());
+  wrapper.append(props.surface.canvas);
+  let width = 0;
+  const fit = () => {
+    // Setting a canvas's size clears it, even to the same size: only when it really changed.
+    if (wrapper.clientWidth === width) return;
+    width = wrapper.clientWidth;
+    runtime.resize(width, devicePixelRatio);
+    loop.drawNow();
   };
-  canvas.addEventListener('webglcontextlost', lost);
-  const observer = new ResizeObserver(() => {
-    runtime.resize(wrapper.clientWidth, devicePixelRatio);
-    loop.invalidate();
-  });
+  fit();
+  const observer = new ResizeObserver(fit);
   observer.observe(wrapper);
-  const stop = () => {
+  const detach = () => {
     loop.stop();
     observer.disconnect();
-    canvas.removeEventListener('webglcontextlost', lost);
     runtime.dispose();
-    canvas.remove();
-    delete wrapper.dataset.webgl;
   };
-  return { live: { runtime, invalidate: loop.invalidate, wrapper }, stop };
+  return { live: { runtime, invalidate: loop.invalidate, wrapper }, detach };
+}
+
+interface Build {
+  cancel: () => void;
+  /** Resolves once the build has finished or given up, and freed whatever it gave up. */
+  settled: Promise<void>;
+}
+
+/** What a scene is built for: the props that need a new runtime when they change. */
+interface Wanted {
+  size: Size;
+  dark: boolean;
+  reducedMotion: boolean;
+}
+
+/** One surface's scenes: the one on screen, the build under way, and whether it is closed. */
+interface Scenes {
+  wrapper: HTMLDivElement;
+  surface: SceneSurface;
+  latest: RefObject<Board3DProps>;
+  onLive: (live: Live) => void;
+  lost: () => void;
+  shown: Shown | undefined;
+  building: Build | undefined;
+  closed: boolean;
 }
 
 /**
- * Builds the scene for `wrapper` in the background (the flat board shows meanwhile) and calls
- * `onLive` once it is attached; returns how to stop it, whether built yet or not.
+ * Builds a runtime for `wanted` while the one on screen keeps drawing. The build claims the GL
+ * context only after the build before it has settled (so one renderer at most works on it), then
+ * takes the shown runtime down (its last frame stays on the canvas) and swaps in without a gap.
  */
-function start(
+function build(scenes: Scenes, wanted: Wanted): void {
+  const before = scenes.building;
+  before?.cancel();
+  let cancelled = false;
+  const claim = async () => {
+    await before?.settled;
+    if (cancelled || scenes.closed) return false;
+    scenes.shown?.detach();
+    scenes.shown = undefined;
+    return true;
+  };
+  const { canvas, gl } = scenes.surface;
+  const settled = createRuntime({
+    ...{ ...wanted, canvas, gl, skin: scenes.latest.current.skin, claim },
+    invalidate: () => scenes.shown?.live.invalidate(),
+    cancelled: () => cancelled || scenes.closed,
+  }).then(
+    (runtime) => {
+      if (runtime === undefined) return;
+      scenes.shown = show(scenes.wrapper, runtime, scenes.latest);
+      scenes.onLive(scenes.shown.live);
+    },
+    () => {
+      if (!cancelled) scenes.lost();
+    },
+  );
+  const cancel = () => {
+    cancelled = true;
+  };
+  scenes.building = { cancel, settled };
+}
+
+/** The 3D board on one surface (one canvas, one GL context) over its life: builds and swaps scenes. */
+function stageOf(
   wrapper: HTMLDivElement,
-  props: Board3DProps,
+  surface: SceneSurface,
   latest: RefObject<Board3DProps>,
   onLive: (live: Live) => void,
-): () => void {
-  let stopped = false;
-  let stopAttached: (() => void) | undefined;
-  // A picture that loads asks for a frame through here, once the loop exists.
-  let invalidate: (() => void) | undefined;
-  const { surface, size, dark, reducedMotion } = props;
-  const built = createRuntime({
-    ...{ canvas: surface.canvas, gl: surface.gl, size, dark, reducedMotion },
-    invalidate: () => {
-      invalidate?.();
+) {
+  const scenes: Scenes = {
+    ...{ wrapper, surface, latest, onLive, shown: undefined, building: undefined, closed: false },
+    // From the start, a build included: a lost context (a GPU reset) means back to the flat board.
+    lost: () => {
+      if (!scenes.closed) latest.current.onLost();
     },
-    cancelled: () => stopped,
-  });
-  void built.then((runtime) => {
-    if (runtime === undefined || stopped) return;
-    const scene = attach(wrapper, runtime, surface, latest);
-    invalidate = scene.live.invalidate;
-    stopAttached = scene.stop;
-    onLive(scene.live);
-  });
-  return () => {
-    stopped = true;
-    stopAttached?.();
+  };
+  surface.canvas.addEventListener('webglcontextlost', scenes.lost);
+  const close = () => {
+    scenes.closed = true;
+    scenes.building?.cancel();
+    scenes.shown?.detach();
+    scenes.shown = undefined;
+    surface.canvas.removeEventListener('webglcontextlost', scenes.lost);
+    surface.canvas.remove();
+    delete wrapper.dataset.webgl;
+  };
+  return {
+    build: (wanted: Wanted) => {
+      build(scenes, wanted);
+    },
+    close,
   };
 }
 
+type Stage = ReturnType<typeof stageOf>;
+
 function useRuntime(ref: RefObject<HTMLDivElement | null>, props: Board3DProps): Live | undefined {
   const [live, setLive] = useState<Live | undefined>(undefined);
+  const [stage, setStage] = useState<Stage | undefined>(undefined);
   const latest = useRef(props);
   latest.current = props;
   const { surface, size, dark, reducedMotion } = props;
   useEffect(() => {
     const wrapper = ref.current;
     if (wrapper === null) return undefined;
-    const props = { ...latest.current, surface, size, dark, reducedMotion };
-    const stop = start(wrapper, props, latest, setLive);
+    const made = stageOf(wrapper, surface, latest, setLive);
+    setStage(made);
     return () => {
+      setStage(undefined);
       setLive(undefined);
-      stop();
+      made.close();
     };
-  }, [ref, surface, size, dark, reducedMotion]);
+  }, [ref, surface]);
+  // A new size, theme or motion setting: a new scene, built while the current one stays up.
+  useEffect(() => {
+    stage?.build({ size, dark, reducedMotion });
+  }, [stage, size, dark, reducedMotion]);
   return live;
 }
 
@@ -173,12 +251,18 @@ function useStateFeed(current: Live | undefined, props: Board3DProps): void {
   }, [current, skinKey, dark]);
 }
 
-/** Wiggles a tile each time a new nudge arrives. */
+/**
+ * Wiggles a tile each time a new nudge arrives. The last serial is remembered, so a rebuilt
+ * runtime (a new `current`) does not replay a nudge it has already shown, nor one from before the
+ * board was mounted.
+ */
 function useNudge(current: Live | undefined, nudge: Board3DProps['nudge']): void {
   const tile = nudge?.tile;
   const serial = nudge?.serial;
+  const shown = useRef(serial);
   useEffect(() => {
-    if (current === undefined || tile === undefined || serial === undefined) return;
+    if (current === undefined || tile === undefined || serial === shown.current) return;
+    shown.current = serial;
     current.runtime.nudge(tile, performance.now());
     current.invalidate();
   }, [current, tile, serial]);

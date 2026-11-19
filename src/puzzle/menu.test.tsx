@@ -2,7 +2,15 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { BestResults, closeOnBackdrop, Menu, MenuSection, pickSize, SizeChoice } from './menu.tsx';
+import {
+  backdropCloser,
+  BestResults,
+  Menu,
+  MenuSection,
+  onBackdrop,
+  pickSize,
+  SizeChoice,
+} from './menu.tsx';
 
 const NONE = () => undefined;
 
@@ -100,22 +108,73 @@ describe('BestResults', () => {
   });
 });
 
-describe('closeOnBackdrop', () => {
-  test('a click on the backdrop, the dialog itself, closes the menu', () => {
-    const calls: string[] = [];
-    const dialog = {};
+/** The dialog's box on screen: from (100, 50) to (400, 650). */
+const DIALOG = {
+  getBoundingClientRect: () => ({ left: 100, top: 50, right: 400, bottom: 650 }),
+};
+const at = (clientX: number, clientY: number) => ({ clientX, clientY, currentTarget: DIALOG });
 
-    closeOnBackdrop(() => calls.push('close'))({ target: dialog, currentTarget: dialog });
+describe('onBackdrop', () => {
+  test('a point beside, above or below the dialog is on the backdrop', () => {
+    assert.deepEqual(
+      [
+        onBackdrop(at(99, 300)),
+        onBackdrop(at(401, 300)),
+        onBackdrop(at(250, 49)),
+        onBackdrop(at(250, 651)),
+      ],
+      [true, true, true, true],
+    );
+  });
+
+  test('a point inside the dialog or on its edge is not', () => {
+    assert.deepEqual(
+      [onBackdrop(at(250, 300)), onBackdrop(at(100, 50)), onBackdrop(at(400, 650))],
+      [false, false, false],
+    );
+  });
+});
+
+describe('backdropCloser', () => {
+  test('a press that starts and ends on the backdrop closes the menu', () => {
+    const calls: string[] = [];
+    const closer = backdropCloser(() => calls.push('close'), { current: false });
+
+    closer.onPointerDown(at(20, 20));
+    closer.onClick(at(20, 20));
 
     assert.deepEqual(calls, ['close']);
   });
 
-  test('a click inside the menu leaves it open', () => {
+  test('a drag from a field inside out onto the backdrop leaves the menu open', () => {
     const calls: string[] = [];
+    const closer = backdropCloser(() => calls.push('close'), { current: false });
 
-    closeOnBackdrop(() => calls.push('close'))({ target: { inside: true }, currentTarget: {} });
+    closer.onPointerDown(at(250, 300));
+    closer.onClick(at(20, 20));
 
     assert.deepEqual(calls, []);
+  });
+
+  test('a press that starts on the backdrop and ends inside leaves the menu open', () => {
+    const calls: string[] = [];
+    const closer = backdropCloser(() => calls.push('close'), { current: false });
+
+    closer.onPointerDown(at(20, 20));
+    closer.onClick(at(250, 300));
+
+    assert.deepEqual(calls, []);
+  });
+
+  test('a press closes once: a later click without a new press, such as a key, does not', () => {
+    const calls: string[] = [];
+    const started = { current: true };
+    const closer = backdropCloser(() => calls.push('close'), started);
+
+    closer.onClick(at(20, 20));
+    closer.onClick(at(20, 20));
+
+    assert.deepEqual(calls, ['close']);
   });
 });
 

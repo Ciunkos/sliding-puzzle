@@ -6,6 +6,8 @@ import { expect } from './harness.ts';
 
 export const menuButton = (page: Page) => page.getByTestId('menu-button');
 export const menu = (page: Page) => page.getByTestId('menu');
+/** The menu's own close button: its first control. */
+export const closeButton = (page: Page) => page.getByTestId('menu-close');
 
 /** Opens the menu unless it is open already. */
 export async function openMenu(page: Page): Promise<void> {
