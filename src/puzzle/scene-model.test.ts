@@ -15,6 +15,7 @@ import {
   orientationTilt,
   pointerTilt,
   slideAt,
+  SLIDE_EASING,
   SLIDE_MS,
   tileUv,
   tiltChanged,
@@ -54,17 +55,29 @@ describe('easeOut', () => {
   });
 });
 
+describe('SLIDE_MS and SLIDE_EASING', () => {
+  test('the DOM board slides for the 300 ms of the spring with its overshoot, in 10 ms steps', () => {
+    assert.deepEqual(
+      [SLIDE_MS, SLIDE_EASING],
+      [
+        300,
+        'linear(0, 0.047, 0.158, 0.301, 0.452, 0.594, 0.719, 0.822, 0.902, 0.961, 1.001, 1.027, 1.041, 1.046, 1.045, 1.041, 1.034, 1.027, 1.021, 1.015, 1.01, 1.006, 1.003, 1, 0.999, 0.998, 0.998, 0.998, 0.998, 0.998, 1)',
+      ],
+    );
+  });
+});
+
 describe('slideAt', () => {
   const FROM = { x: 0, y: 0 };
   const TO = { x: 0.25, y: 0 };
 
-  test('a slide halfway through its time is seven eighths of the way, lifted at its highest', () => {
-    const at = slideAt({ from: FROM, to: TO, start: 1000 }, 1070);
+  test('50 ms in, halfway to its landing, a slide is 59% of the way and lifted at its highest', () => {
+    const at = slideAt({ from: FROM, to: TO, start: 1000 }, 1050);
 
-    assert.deepEqual(at, { x: 0.21875, y: 0, lift: 0.01, done: false });
+    assert.deepEqual(at, { x: 0.14854079113814722, y: 0, lift: 0.01, done: false });
   });
 
-  test('a slide at its start has not moved and one after SLIDE_MS is done, resting on the tray', () => {
+  test('a slide before its start has not moved and one 300 ms (SLIDE_MS) in is done, resting on the tray', () => {
     const before = slideAt({ from: FROM, to: TO, start: 1000 }, 990);
     const after = slideAt({ from: FROM, to: TO, start: 1000 }, 1000 + SLIDE_MS);
 
@@ -77,16 +90,27 @@ describe('slideAt', () => {
     );
   });
 
-  test('a quarter of the time in, a slide covers 58% of the way and is lifted 71% of its height', () => {
-    const at = slideAt({ from: FROM, to: TO, start: 1000 }, 1035);
+  test('133 ms in, a landed slide has overshot its cell by 4.6% and rests on the tray', () => {
+    const at = slideAt({ from: FROM, to: TO, start: 1000 }, 1133);
 
-    assert.deepEqual(at, { x: 0.14453125, y: 0, lift: 0.0070710678118654745, done: false });
+    assert.deepEqual(at, { x: 0.2614963872669226, y: 0, lift: 0, done: false });
   });
 
-  test('a tile sliding down from a cell off the centre keeps its column and eases along its row', () => {
+  test('a tile sliding down from a cell off the centre keeps its column and springs along its row', () => {
     const at = slideAt({ from: { x: 0.25, y: 0.25 }, to: { x: 0.25, y: -0.25 }, start: 0 }, 70);
 
-    assert.deepEqual(at, { x: 0.25, y: -0.1875, lift: 0.01, done: false });
+    assert.deepEqual(at, {
+      x: 0.25,
+      y: -0.1608411003198124,
+      lift: 0.008090169943749474,
+      done: false,
+    });
+  });
+
+  test('a slide given twice the time follows the same spring at half the speed', () => {
+    const at = slideAt({ from: FROM, to: TO, start: 1000 }, 1100, 600);
+
+    assert.deepEqual(at, { x: 0.14854079113814722, y: 0, lift: 0.01, done: false });
   });
 
   test('a slide of no duration (reduced motion) is done at once', () => {

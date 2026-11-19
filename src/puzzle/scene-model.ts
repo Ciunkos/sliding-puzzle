@@ -1,6 +1,7 @@
 // The 3D board as numbers: where tiles stand, how they move, how the board tilts. Plain functions,
 // so the scene (use-three-board.ts) only reads them each frame. World units: the board's grid of
 // tiles is the unit square centred on the origin, x to the right, y up, tile tops at z = 0.
+import { IMPACT_MS, SETTLE_MS, springAt, springEasing } from './effects.ts';
 import type { Size } from './rules.ts';
 
 export interface Vec2 {
@@ -11,8 +12,13 @@ export interface Vec2 {
 /** A tilt in degrees: `x` turns the board about its horizontal axis, `y` about its vertical one. */
 export type Tilt = Vec2;
 
-/** How long a tile takes to slide, the same as the DOM board's transition (styles.ts). */
-export const SLIDE_MS = 140;
+/**
+ * How long a tile takes to slide and settle on its spring (effects.ts). The DOM board's transition
+ * (styles.ts) shares it: `transition: transform ${SLIDE_MS}ms ${SLIDE_EASING}`.
+ */
+export const SLIDE_MS = SETTLE_MS;
+/** The spring as a CSS easing, sampled every 10 ms: the DOM tiles overshoot and snap the same way. */
+export const SLIDE_EASING = springEasing(30);
 /** The most the board leans, in degrees: little enough that the buttons stay over their tiles. */
 export const MAX_TILT_DEG = 6;
 /** How high a sliding tile lifts at mid-slide, in board widths. */
@@ -39,19 +45,24 @@ export interface Slide {
   start: number;
 }
 
-/** Where a sliding tile is at `now`, how high it is lifted, and whether it has arrived. */
+/**
+ * Where a sliding tile is at `now` on its spring (past its cell for a moment, then back), how high
+ * it is lifted on the way to its landing, and whether it has settled. `durationMs` stretches the
+ * spring's time; 0 (reduced motion) puts the tile in its cell at once.
+ */
 export function slideAt(
   slide: Slide,
   now: number,
   durationMs = SLIDE_MS,
 ): Vec2 & { lift: number; done: boolean } {
-  const progress = durationMs <= 0 ? 1 : (now - slide.start) / durationMs;
-  const eased = easeOut(progress);
-  const done = progress >= 1;
+  const t = durationMs <= 0 ? SETTLE_MS : ((now - slide.start) * SETTLE_MS) / durationMs;
+  const done = t >= SETTLE_MS;
+  const share = springAt(t);
+  const flight = Math.min(1, Math.max(0, t / IMPACT_MS));
   return {
-    x: slide.from.x + (slide.to.x - slide.from.x) * eased,
-    y: slide.from.y + (slide.to.y - slide.from.y) * eased,
-    lift: done ? 0 : SLIDE_LIFT * Math.sin(Math.PI * Math.max(0, progress)),
+    x: slide.from.x + (slide.to.x - slide.from.x) * share,
+    y: slide.from.y + (slide.to.y - slide.from.y) * share,
+    lift: flight >= 1 ? 0 : SLIDE_LIFT * Math.sin(Math.PI * flight),
     done,
   };
 }

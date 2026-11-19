@@ -25,6 +25,11 @@ export interface Board3DProps {
   dark: boolean;
   reducedMotion: boolean;
   tilt: TiltMode;
+  /**
+   * The latest tap on a tile that cannot move: it wiggles toward the gap. A new object (a new
+   * `serial`) wiggles it again; undefined or the same object does nothing.
+   */
+  nudge?: { tile: number; serial: number } | undefined;
   /** The first frame is drawn: the DOM board may hand its looks over. */
   onReady: () => void;
   /** The WebGL context was lost: back to the flat board. */
@@ -62,10 +67,14 @@ function demandLoop(draw: (now: number) => boolean, onFirst: () => void) {
   return { invalidate, stop };
 }
 
-/** Starts the scene in `wrapper`; returns it and how to stop it. */
-function start(wrapper: HTMLDivElement, props: Board3DProps, latest: RefObject<Board3DProps>) {
-  const { canvas, gl } = props.surface;
-  wrapper.append(canvas);
+/** Connects a built runtime to `wrapper`: its canvas, size, context loss and frames. */
+function attach(
+  wrapper: HTMLDivElement,
+  runtime: SceneRuntime,
+  surface: SceneSurface,
+  latest: RefObject<Board3DProps>,
+) {
+  const { canvas } = surface;
   const loop = demandLoop(
     (now) => runtime.frame(now),
     () => {
@@ -73,15 +82,7 @@ function start(wrapper: HTMLDivElement, props: Board3DProps, latest: RefObject<B
       latest.current.onReady();
     },
   );
-  const { size, dark, reducedMotion } = props;
-  const runtime = createRuntime({
-    canvas,
-    gl,
-    size,
-    dark,
-    reducedMotion,
-    invalidate: loop.invalidate,
-  });
+  wrapper.append(canvas);
   const lost = () => {
     latest.current.onLost();
   };
@@ -102,6 +103,41 @@ function start(wrapper: HTMLDivElement, props: Board3DProps, latest: RefObject<B
   return { live: { runtime, invalidate: loop.invalidate, wrapper }, stop };
 }
 
+/**
+ * Builds the scene for `wrapper` in the background (the flat board shows meanwhile) and calls
+ * `onLive` once it is attached; returns how to stop it, whether built yet or not.
+ */
+function start(
+  wrapper: HTMLDivElement,
+  props: Board3DProps,
+  latest: RefObject<Board3DProps>,
+  onLive: (live: Live) => void,
+): () => void {
+  let stopped = false;
+  let stopAttached: (() => void) | undefined;
+  // A picture that loads asks for a frame through here, once the loop exists.
+  let invalidate: (() => void) | undefined;
+  const { surface, size, dark, reducedMotion } = props;
+  const built = createRuntime({
+    ...{ canvas: surface.canvas, gl: surface.gl, size, dark, reducedMotion },
+    invalidate: () => {
+      invalidate?.();
+    },
+    cancelled: () => stopped,
+  });
+  void built.then((runtime) => {
+    if (runtime === undefined || stopped) return;
+    const scene = attach(wrapper, runtime, surface, latest);
+    invalidate = scene.live.invalidate;
+    stopAttached = scene.stop;
+    onLive(scene.live);
+  });
+  return () => {
+    stopped = true;
+    stopAttached?.();
+  };
+}
+
 function useRuntime(ref: RefObject<HTMLDivElement | null>, props: Board3DProps): Live | undefined {
   const [live, setLive] = useState<Live | undefined>(undefined);
   const latest = useRef(props);
@@ -110,11 +146,11 @@ function useRuntime(ref: RefObject<HTMLDivElement | null>, props: Board3DProps):
   useEffect(() => {
     const wrapper = ref.current;
     if (wrapper === null) return undefined;
-    const scene = start(wrapper, { ...latest.current, surface, size, dark, reducedMotion }, latest);
-    setLive(scene.live);
+    const props = { ...latest.current, surface, size, dark, reducedMotion };
+    const stop = start(wrapper, props, latest, setLive);
     return () => {
       setLive(undefined);
-      scene.stop();
+      stop();
     };
   }, [ref, surface, size, dark, reducedMotion]);
   return live;
@@ -135,6 +171,17 @@ function useStateFeed(current: Live | undefined, props: Board3DProps): void {
     current.runtime.setSkin(JSON.parse(skinKey) as SceneSkin, dark);
     current.invalidate();
   }, [current, skinKey, dark]);
+}
+
+/** Wiggles a tile each time a new nudge arrives. */
+function useNudge(current: Live | undefined, nudge: Board3DProps['nudge']): void {
+  const tile = nudge?.tile;
+  const serial = nudge?.serial;
+  useEffect(() => {
+    if (current === undefined || tile === undefined || serial === undefined) return;
+    current.runtime.nudge(tile, performance.now());
+    current.invalidate();
+  }, [current, tile, serial]);
 }
 
 function boardRect(wrapper: HTMLElement) {
@@ -187,6 +234,7 @@ export function useThreeBoard(props: Board3DProps): RefObject<HTMLDivElement | n
   const ref = useRef<HTMLDivElement>(null);
   const live = useRuntime(ref, props);
   useStateFeed(live, props);
+  useNudge(live, props.nudge);
   useTilt(live, props.tilt);
   return ref;
 }
