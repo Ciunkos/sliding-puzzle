@@ -58,3 +58,13 @@ function scrubValues(record: Record<string, unknown>, depth: number): Record<str
 export function scrubEvent(event: unknown): unknown {
   return isRecord(event) ? scrubValues(event, 2) : event;
 }
+
+/** This app's name on every event: the analytics project is shared with other sites. */
+const APP_NAME = 'sliding-puzzle';
+
+/** An event as the SDK is about to send it, with `app` among its properties. */
+export function tagApp(event: unknown): unknown {
+  if (!isRecord(event)) return event;
+  const properties = isRecord(event.properties) ? event.properties : {};
+  return { ...event, properties: { ...properties, app: APP_NAME } };
+}

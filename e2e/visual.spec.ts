@@ -12,6 +12,7 @@ import {
   toggle3d,
   withoutWebGl,
 } from './support/look.ts';
+import { closeMenu, openMenu, switch3d } from './support/menu.ts';
 
 /** A 2 x 1 pixel PNG (one red, one blue pixel), made once with node:zlib outside the tests. */
 const TINY_PNG = Buffer.from(
@@ -63,7 +64,7 @@ test('a bundled picture and the 3D switch are remembered by this browser', async
 
 /** 3D off: no 3D board, the flat tiles show their square of the picture, and a tap plays. */
 async function switchOff3d(page: Page): Promise<void> {
-  await toggle3d(page).click();
+  await switch3d(page);
   await expect(scene(page)).toHaveCount(0);
   await expect(tile(page, 1).locator('.sp-picture')).toHaveCSS('background-size', '400% 400%');
   await tapAndMove(page);
@@ -110,10 +111,30 @@ test('the player’s own photo becomes the picture, stays after a reload, and ca
 test('without WebGL the flat board is shown and plays', async ({ page, request }) => {
   await withoutWebGl(page);
   await startKnownGame(page, request, uniqueNickname());
+  await openMenu(page);
   await expect(
     page.getByText('This browser cannot draw the 3D board, so the flat board is shown.'),
   ).toBeVisible();
+  await closeMenu(page);
   await expect(scene(page)).toHaveCount(0);
   await expect(board(page)).not.toHaveClass(/sp-layered/);
   await tapAndMove(page);
+});
+
+test('a first visit starts on a bundled picture, not on plain numbers', async ({ page }) => {
+  await page.goto('/sliding-puzzle');
+
+  await expect(board(page)).toHaveAttribute('data-skin', /^(rocket|cat|balloon|fish|castle)$/);
+});
+
+test('a tile that cannot move wiggles when it is tapped, and nothing moves', async ({
+  page,
+  request,
+}) => {
+  await startKnownGame(page, request, uniqueNickname());
+
+  await tile(page, 1).dispatchEvent('click');
+
+  await expect(tile(page, 1)).toHaveAttribute('data-nudge', /^[ab]$/);
+  await expect(moves(page)).toHaveText('Moves: 0');
 });

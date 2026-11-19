@@ -9,6 +9,7 @@ type Value = FeatureEvent['properties'][string];
 type Rule = (value: Value) => boolean;
 
 const FINITE: Rule = (value) => typeof value === 'number' && Number.isFinite(value);
+const BOOLEAN: Rule = (value) => typeof value === 'boolean';
 const oneOf =
   (...values: string[]): Rule =>
   (value) =>
@@ -19,6 +20,7 @@ const ALLOWLIST = new Map<string, Readonly<Record<string, Rule>>>([
   ['game_started', { size: FINITE }],
   ['game_solved', { size: FINITE, moves: FINITE, seconds: FINITE }],
   ['skin_changed', { kind: oneOf('numbers', 'picture', 'photo') }],
+  ['sound_changed', { on: BOOLEAN }],
 ]);
 
 /** The event as it may leave the page, or undefined when it may not leave at all. */

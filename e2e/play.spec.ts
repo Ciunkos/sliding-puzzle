@@ -19,6 +19,7 @@ import {
   SOLVED_BOARD,
 } from './support/boards.ts';
 import { expect, test, uniqueNickname } from './support/harness.ts';
+import { chooseSize } from './support/menu.ts';
 
 test('only the tiles next to the blank can be moved', async ({ page, request }) => {
   await startKnownGame(page, request, uniqueNickname());
@@ -147,7 +148,7 @@ test('a swipe on the board slides a tile, and a tap after it still works', async
 
 /** With reduced motion: 3x3 starts a game of 9 cells whose tiles do not animate but still move. */
 async function threeByThreeWithoutMotion(page: Page): Promise<void> {
-  await sizeChoice(page, 3).click();
+  await chooseSize(page, 3);
   await expect(board(page)).toHaveAttribute('data-board', /^\d+(,\d+){8}$/);
   await expect(sizeChoice(page, 3)).toHaveAttribute('aria-pressed', 'true');
   await expect(tile(page, 1)).toHaveCSS('transition-duration', '0s');
@@ -161,13 +162,13 @@ test('choosing a size starts a new game of that size, with or without motion', a
 }) => {
   await startKnownGame(page, request, uniqueNickname());
   await test.step('tiles slide with a short transition', async () => {
-    await expect(tile(page, 1)).toHaveCSS('transition-duration', '0.14s');
+    await expect(tile(page, 1)).toHaveCSS('transition-duration', '0.3s');
   });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await test.step('3x3 starts a game of 9 cells, and a tile still moves without motion', () =>
     threeByThreeWithoutMotion(page));
   await test.step('5x5 starts a game of 25 cells', async () => {
-    await sizeChoice(page, 5).click();
+    await chooseSize(page, 5);
     await expect(board(page)).toHaveAttribute('data-board', /^\d+(,\d+){24}$/);
     await expect(moves(page)).toHaveText('Moves: 0');
   });

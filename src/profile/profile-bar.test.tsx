@@ -8,7 +8,6 @@ function renderBar(): string {
     <ProfileBar
       nickname="brave-otter-100"
       shareUrl="http://localhost/sliding-puzzle/p/brave-otter-100"
-      focusOnMount={false}
       onOpen={() => undefined}
       onRandom={() => undefined}
     />,

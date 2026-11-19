@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import fc from 'fast-check';
-import { analyticsAllowed, scrubEvent, scrubUrl } from './analytics-policy.ts';
+import { analyticsAllowed, scrubEvent, scrubUrl, tagApp } from './analytics-policy.ts';
 
 /** A player on the real site who allowed everything. */
 const ON_THE_SITE = {
@@ -114,5 +114,25 @@ describe('scrubEvent', () => {
       },
       $set_once: { $initial_current_url: 'https://ciunkos.com/sliding-puzzle' },
     });
+  });
+});
+
+describe('tagApp', () => {
+  test('every event names this app, beside the properties it already has', () => {
+    assert.deepEqual(tagApp({ event: 'game_solved', properties: { size: 4, moves: 80 } }), {
+      event: 'game_solved',
+      properties: { size: 4, moves: 80, app: 'sliding-puzzle' },
+    });
+  });
+
+  test('an event without properties gets them, with the app', () => {
+    assert.deepEqual(tagApp({ event: '$identify' }), {
+      event: '$identify',
+      properties: { app: 'sliding-puzzle' },
+    });
+  });
+
+  test('something that is not an event is left as it is', () => {
+    assert.deepEqual([tagApp(null), tagApp('page_view'), tagApp([1])], [null, 'page_view', [1]]);
   });
 });

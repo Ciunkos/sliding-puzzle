@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { SavedGame } from '../game/index.ts';
 import { grid } from '../test-support/grid.ts';
 import type { PuzzleState } from './index.ts';
-import { type BoardLook, BoardView } from './board-view.tsx';
+import { type BoardLook, BoardView, nudgeOf } from './board-view.tsx';
 
 /** A 3x3 board with the blank in the middle: tiles 2, 4, 6 and 8 can slide into it. */
 const BLANK_IN_THE_MIDDLE = grid`
@@ -183,5 +183,32 @@ describe('BoardView', () => {
 
     assert.doesNotMatch(html, /sp-corner/);
     assert.match(html, / class="sp-board sp-size-5 sp-layered">/);
+  });
+});
+
+describe('nudgeOf', () => {
+  test('only the nudged tile wiggles, and a new nudge of it plays the other wiggle', () => {
+    assert.deepEqual(
+      [
+        nudgeOf(undefined, 4),
+        nudgeOf({ tile: 4, serial: 1 }, 7),
+        nudgeOf({ tile: 4, serial: 1 }, 4),
+        nudgeOf({ tile: 4, serial: 2 }, 4),
+      ],
+      [undefined, undefined, 'b', 'a'],
+    );
+  });
+
+  test('the nudged tile carries its wiggle in data-nudge', () => {
+    const html = renderToStaticMarkup(
+      <BoardView
+        game={savedGame(BLANK_IN_THE_MIDDLE, false)}
+        onMove={() => undefined}
+        nudge={{ tile: 3, serial: 5 }}
+      />,
+    );
+
+    assert.match(html, /data-testid="tile-3" data-tile="3" data-nudge="b" aria-label="Tile 3"/);
+    assert.match(html, /data-testid="tile-1" data-tile="1" aria-label="Tile 1"/);
   });
 });

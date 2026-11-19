@@ -52,3 +52,8 @@ export function skinChanged(
   if (previous === undefined || previous === current) return undefined;
   return { name: 'skin_changed', properties: { kind: skinKind(current) } };
 }
+
+/** `sound_changed` when the player switches all sound on or off with the speaker button. */
+export function soundChanged(on: boolean): FeatureEvent {
+  return { name: 'sound_changed', properties: { on } };
+}

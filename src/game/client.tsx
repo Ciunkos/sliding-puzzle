@@ -1,6 +1,6 @@
 // Client entry: the generic browser side of a game (API client, session hook) and the shape of a
 // game feature's client side. Games render their own screen; this module has no game UI.
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 
 export * from './index.ts';
 export { createGameApi, type GameApi } from './api.ts';
@@ -24,11 +24,13 @@ export interface ClientFeature {
   title: string;
   /**
    * `apiBase` is where the API is mounted, e.g. /sliding-puzzle/api. `onEvent`, when given, hears
-   * the moments the screen reports.
+   * the moments the screen reports. `shellMenu` is what the page itself wants in the game's menu
+   * (who is playing, the usage statistics): the screen shows it in its menu, as it is.
    */
   Screen: (props: {
     nickname: string;
     apiBase: string;
     onEvent?: (event: FeatureEvent) => void;
+    shellMenu: ReactNode;
   }) => ReactElement;
 }

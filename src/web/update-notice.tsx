@@ -1,24 +1,23 @@
-// "A new version is ready": a small bar at the bottom of the screen, over nothing important and
-// without moving the page. Nothing reloads until the player presses Reload.
+// "A new version is ready": a small bar over the top of the screen, without moving the page (the
+// page is exactly one screen). Nothing reloads until the player presses Reload.
 import type { ReactElement } from 'react';
 import { useServiceWorker } from './use-service-worker.ts';
 
 const CSS = `
 .update-notice {
   position: fixed;
-  inset: auto 0 0;
+  z-index: 40;
+  inset: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   align-items: center;
   gap: 0.5rem 1rem;
-  padding: 0.5rem 1rem calc(0.5rem + env(safe-area-inset-bottom));
+  padding: calc(0.5rem + env(safe-area-inset-top)) 1rem 0.5rem;
   background: #111;
   color: #fff;
 }
 .update-notice p { margin: 0; }
-/* Room at the end of the page, so the bar never hides its last controls. */
-.update-spacer { height: 5rem; }
 .update-notice button {
   min-height: 44px;
   font: inherit;
@@ -46,7 +45,6 @@ export function UpdateNotice(props: { url: string | undefined }): ReactElement {
       {offer ? (
         <>
           <style>{CSS}</style>
-          <div className="update-spacer" />
           <div className="update-notice" data-testid="update-notice">
             <p>A new version is ready.</p>
             <button type="button" data-testid="update-reload" onClick={reload}>

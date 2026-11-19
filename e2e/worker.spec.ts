@@ -10,6 +10,7 @@ import {
   openProfileUntilMoves,
 } from './support/app.ts';
 import { expect, test } from './support/harness.ts';
+import { openMenu } from './support/menu.ts';
 
 /** Where `from` redirects to, after checking that it is a permanent redirect. */
 async function redirectTarget(request: APIRequestContext, from: string): Promise<string> {
@@ -93,19 +94,19 @@ test('a first visit on D1 gets a profile and a game, and its move is seen by ano
   });
 });
 
-test('the usage statistics switch in the footer is remembered by this browser', async ({
-  page,
-}) => {
+test('the usage statistics switch in the menu is remembered by this browser', async ({ page }) => {
   const usage = page.getByTestId('usage-toggle');
   await page.goto('/sliding-puzzle');
   await expect(usage).toHaveText('Usage statistics: on');
   await test.step('switching off is kept, and still off after a reload', async () => {
+    await openMenu(page);
     await usage.click();
     await expect(usage).toHaveText('Usage statistics: off');
     await page.reload();
     await expect(usage).toHaveText('Usage statistics: off');
   });
   await test.step('switching on again is kept too', async () => {
+    await openMenu(page);
     await usage.click();
     await page.reload();
     await expect(usage).toHaveText('Usage statistics: on');

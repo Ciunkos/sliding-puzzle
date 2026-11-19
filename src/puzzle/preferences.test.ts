@@ -1,22 +1,27 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import fc from 'fast-check';
 import { memoryStorage, THROWING_STORAGE } from '../test-support/memory-storage.ts';
 import {
-  DEFAULT_LOOK,
   readLook,
   readPhoto,
   removePhoto,
   shownSkin,
+  startLook,
   writeLook,
   writePhoto,
 } from './preferences.ts';
 
 const PHOTO = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+/** The look a browser that never chose one shows for calm-heron-207 (worked out by hand). */
+const CALM_HERON_START = { skin: 'rocket', scene3d: true, numbers: true };
+/** The bundled pictures, written out by hand. */
+const PICTURES: readonly string[] = ['rocket', 'cat', 'balloon', 'fish', 'castle'];
 
 describe('readLook', () => {
-  test('a browser that never chose a look gets numbers, the 3D board and numbers on pictures', () => {
-    assert.deepEqual(readLook(memoryStorage({})), {
-      skin: 'numbers',
+  test('a browser that never chose a look gets a picture from the nickname, 3D and numbers', () => {
+    assert.deepEqual(readLook(memoryStorage({}), 'brave-otter-100'), {
+      skin: 'cat',
       scene3d: true,
       numbers: true,
     });
@@ -27,7 +32,11 @@ describe('readLook', () => {
 
     writeLook(storage, { skin: 'castle', scene3d: false, numbers: false });
 
-    assert.deepEqual(readLook(storage), { skin: 'castle', scene3d: false, numbers: false });
+    assert.deepEqual(readLook(storage, 'brave-otter-100'), {
+      skin: 'castle',
+      scene3d: false,
+      numbers: false,
+    });
   });
 
   test('a stored look with an unknown skin keeps its other choices and shows numbers', () => {
@@ -35,23 +44,65 @@ describe('readLook', () => {
       'sliding-puzzle:look': '{"skin":"dragon","scene3d":false,"numbers":false}',
     });
 
-    assert.deepEqual(readLook(storage), { skin: 'numbers', scene3d: false, numbers: false });
+    assert.deepEqual(readLook(storage, 'brave-otter-100'), {
+      skin: 'numbers',
+      scene3d: false,
+      numbers: false,
+    });
   });
 
-  test('stored text that is not a look at all gives the default look', () => {
+  test('a stored look with bad switches keeps its picture and turns 3D and numbers on', () => {
+    const storage = memoryStorage({
+      'sliding-puzzle:look': '{"skin":"fish","scene3d":"yes","numbers":7}',
+    });
+
+    assert.deepEqual(readLook(storage, 'brave-otter-100'), {
+      skin: 'fish',
+      scene3d: true,
+      numbers: true,
+    });
+  });
+
+  test('stored text that is not a look at all gives the nickname’s start look', () => {
     assert.deepEqual(
       [
-        readLook(memoryStorage({ 'sliding-puzzle:look': '{oops' })),
-        readLook(memoryStorage({ 'sliding-puzzle:look': '7' })),
+        readLook(memoryStorage({ 'sliding-puzzle:look': '{oops' }), 'calm-heron-207'),
+        readLook(memoryStorage({ 'sliding-puzzle:look': '7' }), 'calm-heron-207'),
       ],
-      [DEFAULT_LOOK, DEFAULT_LOOK],
+      [CALM_HERON_START, CALM_HERON_START],
     );
   });
 
-  test('storage that throws (a private window) gives the default look and writing is ignored', () => {
+  test('storage that throws (a private window) gives the start look and writing is ignored', () => {
     writeLook(THROWING_STORAGE, { skin: 'fish', scene3d: true, numbers: true });
 
-    assert.deepEqual(readLook(THROWING_STORAGE), DEFAULT_LOOK);
+    assert.deepEqual(readLook(THROWING_STORAGE, 'calm-heron-207'), CALM_HERON_START);
+  });
+});
+
+describe('startLook', () => {
+  test('each nickname starts on its own picture, the same one every time', () => {
+    assert.deepEqual(
+      [
+        startLook('brave-otter-100').skin,
+        startLook('calm-heron-207').skin,
+        startLook('quick-lynx-310').skin,
+        startLook('tidy-owl-412').skin,
+      ],
+      ['cat', 'rocket', 'fish', 'castle'],
+    );
+  });
+
+  test('the start picture does not depend on how the nickname is capitalised', () => {
+    assert.equal(startLook('Brave-Otter-100').skin, 'cat');
+  });
+
+  test('every nickname starts on a bundled picture', () => {
+    fc.assert(
+      fc.property(fc.string({ minLength: 2, maxLength: 30 }), (nickname) =>
+        PICTURES.includes(startLook(nickname).skin),
+      ),
+    );
   });
 });
 

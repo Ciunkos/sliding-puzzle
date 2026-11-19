@@ -1,5 +1,6 @@
-// Who is playing, that there is no login, the share link, and how to switch to another profile.
-import { type ReactElement, useEffect, useId, useRef, useState } from 'react';
+// Who is playing, that there is no login, the share link, and how to switch to another profile:
+// the profile's part of the game's menu (or of its own pages: offline, an error).
+import { type ReactElement, useId, useState } from 'react';
 import { copyText, type CopyResult } from './copy-link.ts';
 import * as styles from './styles.ts';
 import { type ProfileForm, useProfileForm } from './use-profile-form.ts';
@@ -10,25 +11,17 @@ const COPY_MESSAGES: Record<CopyResult, string> = {
   failed: 'Could not copy. Copy the link from the address bar.',
 };
 
-function CopyLink({ url }: { url: string }): ReactElement {
-  const [result, setResult] = useState<CopyResult | undefined>(undefined);
-  return (
-    <div className={styles.row}>
-      <button
-        type="button"
-        data-testid="copy-link"
-        className={styles.button}
-        onClick={() => {
-          void copyText(url).then(setResult);
-        }}
-      >
-        Copy link
-      </button>
-      <span role="status" data-testid="copy-status">
-        {result === undefined ? '' : COPY_MESSAGES[result]}
-      </span>
-    </div>
-  );
+/** The copy button's last result, for the link it was pressed for (another profile starts empty). */
+function useCopyResult(url: string) {
+  const [last, setLast] = useState<{ url: string; result: CopyResult } | undefined>(undefined);
+  return {
+    message: last?.url === url ? COPY_MESSAGES[last.result] : '',
+    copy: () => {
+      void copyText(url).then((result) => {
+        setLast({ url, result });
+      });
+    },
+  };
 }
 
 function SwitchForm({ form }: { form: ProfileForm }): ReactElement {
@@ -71,7 +64,7 @@ function SwitchProfile(props: {
 }): ReactElement {
   const form = useProfileForm(props.onOpen);
   return (
-    <details data-testid="switch-profile">
+    <details data-testid="switch-profile" className={styles.disclosure}>
       <summary className={styles.summary}>Switch profile</summary>
       <SwitchForm form={form} />
       <div className={styles.row}>
@@ -92,28 +85,29 @@ export function ProfileBar(props: {
   nickname: string;
   /** The full URL of this profile, to share. */
   shareUrl: string;
-  /** Moves focus to the heading when it appears, e.g. after leaving the invalid-name screen. */
-  focusOnMount: boolean;
   onOpen: (nickname: string) => void;
   onRandom: () => void;
 }): ReactElement {
   const headingId = useId();
-  const heading = useRef<HTMLHeadingElement>(null);
-  useEffect(() => {
-    if (props.focusOnMount) heading.current?.focus();
-    // Only when the bar appears; later changes of the profile keep focus where it is.
-  }, []);
+  const copy = useCopyResult(props.shareUrl);
   return (
-    <section aria-labelledby={headingId} className={styles.section}>
+    <section aria-labelledby={headingId} className={styles.bar}>
       {/* The profile's stylesheet; the bar is on screen whenever the profile's error can be. */}
       <style>{styles.css}</style>
-      <h2 id={headingId} ref={heading} tabIndex={-1} className={styles.heading}>
+      <h2 id={headingId} className={styles.barHeading}>
         Playing as <span data-testid="current-profile">{props.nickname}</span>
       </h2>
-      <p data-testid="profile-notice" className={styles.notice}>
+      <p data-testid="menu-profile-notice" className={styles.barNotice}>
         There is no login. Anyone with this link can play this profile.
       </p>
-      <CopyLink key={props.shareUrl} url={props.shareUrl} />
+      <div className={styles.row}>
+        <button type="button" data-testid="copy-link" className={styles.button} onClick={copy.copy}>
+          Copy link
+        </button>
+        <span role="status" data-testid="copy-status">
+          {copy.message}
+        </span>
+      </div>
       <SwitchProfile onOpen={props.onOpen} onRandom={props.onRandom} />
     </section>
   );

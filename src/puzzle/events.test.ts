@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import type { SavedGame } from '../game/index.ts';
 import { grid } from '../test-support/grid.ts';
-import { gameEvents, skinChanged } from './events.ts';
+import { gameEvents, skinChanged, soundChanged } from './events.ts';
 import type { PuzzleState } from './index.ts';
 
 const SOLVED_4 = grid`
@@ -158,5 +158,17 @@ describe('skinChanged', () => {
       name: 'skin_changed',
       properties: { kind: 'numbers' },
     });
+  });
+});
+
+describe('soundChanged', () => {
+  test('the speaker button reports whether sound is now on', () => {
+    assert.deepEqual(
+      [soundChanged(true), soundChanged(false)],
+      [
+        { name: 'sound_changed', properties: { on: true } },
+        { name: 'sound_changed', properties: { on: false } },
+      ],
+    );
   });
 });

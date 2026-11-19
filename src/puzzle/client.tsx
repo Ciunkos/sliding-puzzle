@@ -1,5 +1,7 @@
 // Client entry: the puzzle's client-side feature (its screen). Logic lives in plain .ts files.
-// The shell (src/web) renders the page's <main> and <h1>; this screen is a section inside it.
+// The shell (src/web) renders the page's <main> and <h1>; this screen fills <main>: the board as
+// large as the screen allows, the HUD in its corners (hud.tsx) and everything else in the menu
+// (menu.tsx), with the page's own part of it (`shellMenu`) at the top.
 import {
   Component,
   lazy,
@@ -12,7 +14,6 @@ import {
   useState,
 } from 'react';
 import {
-  type BestResult,
   type ClientFeature,
   createGameApi,
   type GameSession,
@@ -27,6 +28,8 @@ import {
   type PuzzleState,
   puzzleDefinition,
 } from './definition.ts';
+import { soundChanged } from './events.ts';
+import { Actions, Line, MenuButton, Status, WinCard } from './hud.tsx';
 import { LookControls } from './look-controls.tsx';
 import {
   pictureDescription,
@@ -35,18 +38,24 @@ import {
   sceneSkin,
   tiltMode,
 } from './look-model.ts';
+import { BestResults, Menu, MenuSection, SizeChoice } from './menu.tsx';
+import { paletteStyle } from './palettes.ts';
 import { shownSkin } from './preferences.ts';
-import { type Size, SIZES, sizeOf } from './rules.ts';
+import { type Size, sizeOf } from './rules.ts';
+import { SOUND_STYLES, SoundButton, SoundSettings } from './sound-button.tsx';
 import { css } from './styles.ts';
 import { useAnnouncement } from './use-announcement.ts';
 import { useGameEvents, useSkinEvents } from './use-feature-events.ts';
 import { type LookChoices, useLook } from './use-look.ts';
 import { useMedia } from './use-media.ts';
+import { useMenu } from './use-menu.ts';
 import { useNow } from './use-now.ts';
 import { type OrientationTilt, useOrientationTilt } from './use-orientation-tilt.ts';
 import { useQuietOnline } from './use-quiet-online.ts';
 import { useSavingHint } from './use-saving-hint.ts';
 import { type SceneSurface, useSceneSurface } from './use-scene-surface.ts';
+import { type Shake, useShake } from './use-shake.ts';
+import { type Sound, useSound } from './use-sound.ts';
 import type { Board3DProps } from './use-three-board.ts';
 import {
   bestOf,
@@ -100,43 +109,6 @@ type Game = SavedGame<PuzzleState>;
 /** The size of a new game when none is on screen yet. */
 const DEFAULT_SIZE: Size = 4;
 
-/**
- * Moves, play time and the "Saving…" hint (once saving takes a while), on one line of fixed height. The timer is plain text,
- * outside the live region, so it is never read out on its own.
- */
-function Status(props: { game: Game | undefined; elapsed: number; saving: boolean }): ReactElement {
-  const { game } = props;
-  return (
-    <div className="sp-status">
-      {game === undefined ? null : (
-        <p className="sp-counts">
-          <span data-testid="moves">{statusText(game)}</span>
-          <time data-testid="timer" className="sp-timer">
-            {formatElapsed(props.elapsed)}
-          </time>
-        </p>
-      )}
-      <p data-testid="saving" className="sp-saving">
-        {props.saving ? 'Saving…' : ''}
-      </p>
-    </div>
-  );
-}
-
-/** The win, in the line under the board: the board stays fully visible in its solved colours. */
-function Win(props: { game: Game; elapsed: number; newBest: boolean }): ReactElement {
-  return (
-    <div className="sp-win">
-      <p data-testid="solved-banner" className="sp-banner">
-        {solvedText(props.game)}
-      </p>
-      <p data-testid="result" className="sp-result">
-        {resultText(props.elapsed, props.newBest)}
-      </p>
-    </div>
-  );
-}
-
 /** The 3D board as drawn for the screen: everything it needs except the game. */
 type SceneProps = Omit<Board3DProps, 'board' | 'size' | 'finished' | 'moves'>;
 
@@ -158,11 +130,22 @@ function Scene3D(props: { scene: SceneProps; game: Game }): ReactElement {
   );
 }
 
+/** A tile to wiggle because it could not move; a new serial wiggles it again. */
+type Nudge = { tile: number; serial: number } | undefined;
+
+/** What the board hands back: a move, or a tap or key that moved nothing. */
+interface BoardHandlers {
+  nudge: Nudge;
+  onBlocked: (tile: number | undefined) => void;
+}
+
 /** The board, or a square of the same size while the game loads; the 3D board under it. */
 function Stage(props: {
   session: Session;
   look: BoardLook;
   scene: SceneProps | undefined;
+  shake: Shake;
+  board: BoardHandlers;
 }): ReactElement {
   const { game, message } = props.session;
   if (game === undefined) {
@@ -174,14 +157,17 @@ function Stage(props: {
       </div>
     );
   }
+  const { nudge, onBlocked } = props.board;
   return (
-    <div className="sp-stage">
-      {props.scene === undefined ? null : <Scene3D scene={props.scene} game={game} />}
+    <div className="sp-stage" data-shake={props.shake}>
+      {props.scene === undefined ? null : <Scene3D scene={{ ...props.scene, nudge }} game={game} />}
       {/* Keyed by size: a new size gets new tiles instead of sliding them out of the old board. */}
       <BoardView
         key={game.state.board.length}
         game={game}
         look={props.look}
+        nudge={nudge}
+        onBlocked={onBlocked}
         onMove={(tile) => {
           props.session.move({ tile });
         }}
@@ -190,140 +176,46 @@ function Stage(props: {
   );
 }
 
-/** An error is an alert; a notice (offline, changed elsewhere) is plain text. */
-function MessageLine(props: { message: string; notice: string | undefined }): ReactElement {
-  return (
-    <div data-testid="game-error">
-      {props.message === props.notice ? (
-        <p data-testid="game-notice" className="sp-notice">
-          {props.notice}
-        </p>
-      ) : (
-        <p role="alert" className="sp-error">
-          {props.message}
-        </p>
-      )}
-    </div>
-  );
-}
-
-/**
- * The line under the board, its height always reserved: the engine's `message` (the error, or else
- * the notice: one sentence, shown once), the win, or how to play. `game-error` names the message
- * whatever it holds (e2e reads it); `game-notice` marks a notice.
- */
-function Below(props: { session: Session; elapsed: number }): ReactElement {
-  const { game, message, notice, results } = props.session;
-  return (
-    <div className="sp-below">
-      {message === undefined ? null : <MessageLine message={message} notice={notice} />}
-      {game?.finished === true ? (
-        <Win game={game} elapsed={props.elapsed} newBest={isNewPersonalBest(results, game)} />
-      ) : null}
-      {message === undefined && game?.finished !== true ? (
-        <p className="sp-howto">Tap a tile next to the gap, swipe, or use the arrow keys.</p>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Busy controls stay focusable (aria-disabled); the session ignores a request while one runs. A
- * finished game cannot be reset (the engine refuses it), so Reset is unavailable and says why.
- */
-function Controls(props: { session: Session; onNewGame: () => void }): ReactElement {
-  const { session } = props;
-  const hintId = useId();
-  const finished = session.game?.finished === true;
-  return (
-    <div className="sp-row">
-      <button
-        type="button"
-        data-testid="new-game"
-        className="sp-button"
-        aria-disabled={session.busy}
-        onClick={props.onNewGame}
-      >
-        New game
-      </button>
-      <button
-        type="button"
-        data-testid="reset"
-        className={finished ? 'sp-button sp-unavailable' : 'sp-button'}
-        aria-disabled={session.busy || finished}
-        aria-describedby={finished ? hintId : undefined}
-        onClick={() => {
-          if (!finished) session.reset();
-        }}
-      >
-        Reset
-      </button>
-      <span id={hintId} className="sp-visually-hidden">
-        Start a new game to play again.
-      </span>
-    </div>
-  );
-}
-
-function SizeChoice(props: {
-  current: Size | undefined;
-  busy: boolean;
-  onPick: (size: Size) => void;
+/** The board in the middle of the screen, and the win card over it once the game is solved. */
+function Arena(props: {
+  session: Session;
+  look: BoardLook;
+  scene: SceneProps | undefined;
+  elapsed: number;
+  board: BoardHandlers;
+  onNewGame: () => void;
 }): ReactElement {
-  const labelId = useId();
-  const hintId = useId();
+  const { session } = props;
+  const { game } = session;
+  const shake = useShake(game?.moves, game?.finished === true);
   return (
-    <div className="sp-sizes" role="group" aria-labelledby={labelId} aria-describedby={hintId}>
-      <span id={labelId} className="sp-label">
-        Board size
-      </span>
-      <div className="sp-row">
-        {SIZES.map((size) => (
-          <button
-            key={size}
-            type="button"
-            data-testid={`size-${String(size)}`}
-            className="sp-button"
-            aria-pressed={size === props.current}
-            aria-disabled={props.busy}
-            onClick={() => {
-              props.onPick(size);
-            }}
-          >
-            {sizeLabel(size)}
-          </button>
-        ))}
-      </div>
-      <p id={hintId} className="sp-hint">
-        Picking a size starts a new game in place of this one.
-      </p>
+    <div className="sp-arena">
+      <Stage
+        session={session}
+        look={props.look}
+        scene={props.scene}
+        shake={shake}
+        board={props.board}
+      />
+      {game?.finished === true ? (
+        <WinCard
+          banner={solvedText(game)}
+          result={resultText(props.elapsed, isNewPersonalBest(session.results, game))}
+          busy={session.busy}
+          onPlayAgain={props.onNewGame}
+        />
+      ) : null}
     </div>
   );
 }
 
-/** The best results on this board size; nothing at all until there is one. */
-function Best(props: {
-  game: Game | undefined;
-  results: readonly BestResult[];
-}): ReactElement | null {
-  const labelId = useId();
-  const { game } = props;
+/** The best results on this board size, as lines; none until there is one. */
+function bestLines(session: Session): { title: string; lines: string[] } {
+  const { game } = session;
   const size = game === undefined ? undefined : sizeOf(game.state.board);
-  if (game === undefined || size === undefined) return null;
-  const best = bestOf(props.results, puzzleDefinition.variant(game.state));
-  if (best.length === 0) return null;
-  return (
-    <div className="sp-best">
-      <p id={labelId} className="sp-label">
-        Best on {sizeLabel(size)}
-      </p>
-      <ol data-testid="best-list" aria-labelledby={labelId}>
-        {best.map((result) => (
-          <li key={`${result.finishedAt}-${String(result.moves)}`}>{resultLine(result)}</li>
-        ))}
-      </ol>
-    </div>
-  );
+  if (game === undefined || size === undefined) return { title: '', lines: [] };
+  const best = bestOf(session.results, puzzleDefinition.variant(game.state));
+  return { title: `Best on ${sizeLabel(size)}`, lines: best.map(resultLine) };
 }
 
 /** The play time to show: ticking once a second while a started game is open. */
@@ -456,20 +348,16 @@ function Look(props: { choices: LookChoices; screen: ScreenLook }): ReactElement
 /** The screen's props, as the engine defines them for every game. */
 type ScreenProps = Parameters<ClientFeature['Screen']>[0];
 
-function PuzzleScreen(props: ScreenProps): ReactElement {
+/** The game's state and the things it does, for the screen. */
+function usePuzzle(props: ScreenProps) {
   // Memoised: the session restarts when its api changes.
   const api = useMemo(() => createGameApi(puzzleDefinition, props.apiBase), [props.apiBase]);
   // One object for the whole screen: the session restarts when the options' identity changes, and
   // reads them when a game starts, so the size is written into it just before each start.
   const [options] = useState<PuzzleOptions>(() => ({}));
   const session = useGameSession(api, props.nickname, options);
-  const announced = useAnnouncement(session.game);
   const elapsed = usePlayTime(session);
-  const saving = useSavingHint(session.syncing);
-  const choices = useLook();
-  const screen = useScreenLook(choices);
   const requestedNewGame = useGameEvents(session.game, elapsed, props.onEvent);
-  useSkinEvents(choices.look.skin, props.onEvent);
   const current = session.game === undefined ? undefined : sizeOf(session.game.state.board);
   const startGame = (size: Size) => {
     if (session.busy) return;
@@ -477,22 +365,218 @@ function PuzzleScreen(props: ScreenProps): ReactElement {
     requestedNewGame();
     session.start();
   };
+  return { session, elapsed, current, startGame };
+}
+
+type Puzzle = ReturnType<typeof usePuzzle>;
+type MenuState = ReturnType<typeof useMenu>;
+
+/** What the player's actions do beyond the game itself: their sound, the wiggle, the menu. */
+function actionsOf(props: ScreenProps, puzzle: Puzzle, sound: Sound, menu: MenuState) {
+  const pressed = (action: () => void) => () => {
+    sound.play('press');
+    action();
+  };
+  return {
+    newGame: pressed(() => {
+      puzzle.startGame(puzzle.current ?? DEFAULT_SIZE);
+    }),
+    reset: pressed(puzzle.session.reset),
+    pickSize: (size: Size) => {
+      sound.play('press');
+      menu.close();
+      puzzle.startGame(size);
+    },
+    openMenu: () => {
+      if (!menu.open) sound.play('menu-open');
+      menu.show();
+    },
+    toggleSound: () => {
+      // Muted now means on after the toggle.
+      props.onEvent?.(soundChanged(sound.preferences.muted));
+      sound.toggleMuted();
+    },
+  };
+}
+
+type Actions = ReturnType<typeof actionsOf>;
+
+/** The wiggle of a tile that could not move, and its knock. */
+function useNudge(sound: Sound): BoardHandlers {
+  const [nudge, setNudge] = useState<Nudge>(undefined);
+  return {
+    nudge,
+    onBlocked: (tile) => {
+      sound.play('blocked');
+      if (tile !== undefined) setNudge((last) => ({ tile, serial: (last?.serial ?? 0) + 1 }));
+    },
+  };
+}
+
+/** The menu's content: the game's options first, then the page's own part (`shellMenu`). */
+function MenuContent(props: {
+  shellMenu: ReactNode;
+  puzzle: Puzzle;
+  sound: Sound;
+  choices: LookChoices;
+  screen: ScreenLook;
+  onPickSize: (size: Size) => void;
+}): ReactElement {
+  const { puzzle, sound } = props;
+  const best = bestLines(puzzle.session);
   return (
-    // No heading of its own: the shell has the page's <h1>, the profile bar the one <h2>.
-    <section className="sp-puzzle" aria-label="Puzzle">
-      <style>{css}</style>
-      <Status game={session.game} elapsed={elapsed} saving={saving} />
-      <Stage session={session} look={screen.board} scene={screen.scene} />
-      <Below session={session} elapsed={elapsed} />
-      <Controls
-        session={session}
-        onNewGame={() => {
-          startGame(current ?? DEFAULT_SIZE);
-        }}
+    <>
+      <SizeChoice current={puzzle.current} busy={puzzle.session.busy} onPick={props.onPickSize} />
+      <MenuSection title="Board look">
+        <Look choices={props.choices} screen={props.screen} />
+      </MenuSection>
+      <MenuSection title="Sound">
+        <SoundSettings
+          preferences={sound.preferences}
+          onToggleEffects={sound.toggleEffects}
+          onToggleMusic={sound.toggleMusic}
+        />
+      </MenuSection>
+      <BestResults title={best.title} lines={best.lines} />
+      <div className="sp-menu-shell">{props.shellMenu}</div>
+    </>
+  );
+}
+
+/** The top corners and centre: the menu button, moves and time, and the sound button. */
+function TopBar(props: {
+  menu: MenuState;
+  session: Session;
+  elapsed: number;
+  sound: Sound;
+  actions: Actions;
+}): ReactElement {
+  const { menu, session } = props;
+  const saving = useSavingHint(session.syncing);
+  return (
+    <div className="sp-top">
+      <MenuButton buttonRef={menu.button} open={menu.open} onOpen={props.actions.openMenu} />
+      <Status
+        moves={session.game === undefined ? undefined : statusText(session.game)}
+        time={formatElapsed(props.elapsed)}
+        saving={saving}
       />
-      <SizeChoice current={current} busy={session.busy} onPick={startGame} />
-      <Look choices={choices} screen={screen} />
-      <Best game={session.game} results={session.results} />
+      <SoundButton muted={props.sound.preferences.muted} onToggle={props.actions.toggleSound} />
+    </div>
+  );
+}
+
+/** Everything on the screen itself, around and on the board. */
+function Hud(props: {
+  menu: MenuState;
+  puzzle: Puzzle;
+  screen: ScreenLook;
+  sound: Sound;
+  actions: Actions;
+  board: BoardHandlers;
+}): ReactElement {
+  const { session, elapsed } = props.puzzle;
+  const { actions } = props;
+  return (
+    <div className="sp-screen">
+      <TopBar
+        menu={props.menu}
+        session={session}
+        elapsed={elapsed}
+        sound={props.sound}
+        actions={actions}
+      />
+      <Arena
+        session={session}
+        look={props.screen.board}
+        scene={props.screen.scene}
+        elapsed={elapsed}
+        board={props.board}
+        onNewGame={actions.newGame}
+      />
+      <BottomBar session={session} actions={actions} />
+    </div>
+  );
+}
+
+/** The line under the board and the two actions in the bottom corners. */
+function BottomBar(props: { session: Session; actions: Actions }): ReactElement {
+  const { session, actions } = props;
+  const finished = session.game?.finished === true;
+  return (
+    <>
+      <Line
+        message={session.message}
+        notice={session.notice}
+        finished={finished}
+        moved={(session.game?.moves ?? 0) > 0}
+      />
+      <Actions
+        busy={session.busy}
+        finished={finished}
+        onNewGame={actions.newGame}
+        onReset={actions.reset}
+      />
+    </>
+  );
+}
+
+/** The look choices, with the press sound on picking a picture. */
+function useSoundedLook(nickname: string, sound: Sound): LookChoices {
+  const choices = useLook(nickname);
+  return {
+    ...choices,
+    onPickSkin: (event) => {
+      sound.play('press');
+      choices.onPickSkin(event);
+    },
+  };
+}
+
+/** Everything the screen is made of. */
+function useScreen(props: ScreenProps) {
+  const puzzle = usePuzzle(props);
+  const sound = useSound(puzzle.session.game);
+  const choices = useSoundedLook(props.nickname, sound);
+  const screen = useScreenLook(choices);
+  const menu = useMenu(() => {
+    sound.play('menu-close');
+  });
+  useSkinEvents(choices.look.skin, props.onEvent);
+  // Another profile is another game: the menu that switched to it closes.
+  useEffect(() => {
+    menu.close();
+  }, [props.nickname]);
+  const actions = actionsOf(props, puzzle, sound, menu);
+  return { puzzle, sound, choices, screen, menu, actions, board: useNudge(sound) };
+}
+
+function PuzzleScreen(props: ScreenProps): ReactElement {
+  const { puzzle, sound, choices, screen, menu, actions, board } = useScreen(props);
+  const announced = useAnnouncement(puzzle.session.game);
+  return (
+    // No heading of its own: the shell has the page's <h1>; the menu and the profile have theirs.
+    // The page behind the board takes the picture's colours (palettes.ts).
+    <section className="sp-puzzle" aria-label="Puzzle" style={paletteStyle(screen.board.skin)}>
+      <style>{SOUND_STYLES + css}</style>
+      <Hud
+        menu={menu}
+        puzzle={puzzle}
+        screen={screen}
+        sound={sound}
+        actions={actions}
+        board={board}
+      />
+      <Menu dialogRef={menu.dialog} onClose={menu.close}>
+        <MenuContent
+          shellMenu={props.shellMenu}
+          puzzle={puzzle}
+          sound={sound}
+          choices={choices}
+          screen={screen}
+          onPickSize={actions.pickSize}
+        />
+      </Menu>
       <p role="status" data-testid="announcer" className="sp-visually-hidden">
         {announced}
       </p>

@@ -13,7 +13,13 @@
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0a0d14" media="(prefers-color-scheme: dark)" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <!-- The icon inline (the same drawing as /icons/icon.svg): the browser fetches the tab icon
+         again when the page starts playing sound, and an inline one needs no network. -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='96' fill='%231d4ed8'/><g fill='%23fff'><rect x='76' y='76' width='108' height='108' rx='18'/><rect x='202' y='76' width='108' height='108' rx='18'/><rect x='328' y='76' width='108' height='108' rx='18'/><rect x='76' y='202' width='108' height='108' rx='18'/><rect x='202' y='202' width='108' height='108' rx='18'/><rect x='328' y='202' width='108' height='108' rx='18'/><rect x='76' y='328' width='108' height='108' rx='18'/></g><rect x='244' y='328' width='108' height='108' rx='18' fill='%23fbbf24'/><path d='M376 382 l-22 -20 v40 z' fill='%23fbbf24'/></svg>"
+    />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -30,22 +36,46 @@
     <!-- The page's own styles, here so the first paint already has them (no flash, no shift). -->
     <style>
       body {
-        background: #fff;
-        color: #111;
+        margin: 0;
+        background: #f4ead8;
+        color: #2b1d10;
       }
+      /* Exactly one screen (svh: with the browser's bars shown), never a scrolling page: a game
+         lays itself out inside it, and nothing comes after it that could be pushed (no layout
+         shift). A screen taller than that (a profile page on a small phone) scrolls inside. */
       main {
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        height: 100svh;
+        overflow-y: auto;
         font-family: system-ui, sans-serif;
-        margin: 2rem auto;
-        max-width: 28rem;
-        /* At least a screen tall in every state (static page, loading profile, game, errors):
-           the footer after it starts below the first screen, so the game growing in never
-           pushes it off the screen (a layout shift). */
-        min-height: 100vh;
+      }
+      /* The feature's screen takes the whole of main. */
+      main > * {
+        flex: 0 0 auto;
+      }
+      main > :last-child {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      /* The page's heading, for screen readers and search: the game is the page's picture. */
+      main > h1 {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+        border: 0;
       }
       @media (prefers-color-scheme: dark) {
         body {
-          background: #0a0d14;
-          color: #e8ecf3;
+          background: #14100c;
+          color: #f3e9da;
         }
       }
     </style>

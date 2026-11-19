@@ -1,4 +1,5 @@
-// Event wiring of the board: taps, swipes and keys all end in one `onMove(tile)`. Thin on purpose:
+// Event wiring of the board: taps, swipes and keys all end in one `onMove(tile)`, or in
+// `onBlocked(tile)` for a tap or key on an open game that moves nothing. Thin on purpose:
 // it reads the event and asks input.ts what to move. Covered by e2e/play.spec.ts (it cannot run
 // under server rendering).
 import {
@@ -37,6 +38,12 @@ function tileOf(target: EventTarget): number | undefined {
   if (!(target instanceof Element)) return undefined;
   const value = target.closest('[data-tile]')?.getAttribute('data-tile');
   return value === null || value === undefined ? undefined : Number(value);
+}
+
+/** Focus follows the tile that slid; its element stays the same, so it keeps focus after. */
+function focusTile(board: RefObject<HTMLDivElement | null>, tile: number | undefined): void {
+  if (tile !== undefined)
+    board.current?.querySelector<HTMLElement>(`[data-tile="${String(tile)}"]`)?.focus();
 }
 
 /** Pointer handlers that report a swipe, and whether the click that may follow it is to be ignored. */
@@ -79,12 +86,17 @@ export function useBoardInput(
   board: Board,
   finished: boolean,
   onMove: (tile: number) => void,
+  onBlocked: (tile: number | undefined) => void = () => undefined,
 ): BoardInput {
   const ref = useRef<HTMLDivElement>(null);
   const [preferred, setPreferred] = useState<number | undefined>(undefined);
-  const slide = (tile: number | undefined): number | undefined => {
+  /** Slides `tile` if it can move; else reports `blocked` (the tile the player meant) once. */
+  const slide = (tile: number | undefined, blocked = tile): number | undefined => {
     const chosen = movable(board, finished, tile);
-    if (chosen === undefined) return undefined;
+    if (chosen === undefined) {
+      if (!finished) onBlocked(blocked);
+      return undefined;
+    }
     setPreferred(chosen);
     onMove(chosen);
     return chosen;
@@ -100,10 +112,7 @@ export function useBoardInput(
       const direction = keyDirection(event);
       if (direction === undefined) return;
       event.preventDefault();
-      const tile = slide(tileForDirection(board, direction));
-      // Focus follows the tile that slid; its element stays the same, so it keeps focus after.
-      if (tile !== undefined)
-        ref.current?.querySelector<HTMLElement>(`[data-tile="${String(tile)}"]`)?.focus();
+      focusTile(ref, slide(tileForDirection(board, direction), tileOf(event.target)));
     },
     onFocus(event) {
       setPreferred(tileOf(event.target));

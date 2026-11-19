@@ -1,6 +1,7 @@
 // Steps and locators of the app under test. No expected values are decided here.
 import type { APIRequestContext, Page } from '@playwright/test';
 import { expect } from './harness.ts';
+import { openMenu } from './menu.ts';
 
 /** The isolated API started by playwright.config.ts with ENABLE_TEST_ROUTES=1, under the app's prefix. */
 const API_BASE = 'http://localhost:8788/sliding-puzzle/api';
@@ -52,8 +53,9 @@ export async function switchTo(page: Page, nickname: string): Promise<void> {
   await page.getByTestId('profile-submit').click();
 }
 
-/** Opens the "Switch profile" disclosure (it stays open once opened). */
+/** Opens the menu and its "Switch profile" disclosure (it stays open once opened). */
 export async function openSwitcher(page: Page): Promise<void> {
+  await openMenu(page);
   const switcher = page.getByTestId('switch-profile');
   if ((await switcher.getAttribute('open')) === null) {
     await switcher.locator('summary').click();

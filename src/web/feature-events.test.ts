@@ -65,6 +65,25 @@ describe('allowedEvent', () => {
     assert.deepEqual(allowedEvent(event), { name: 'game_started', properties: {} });
   });
 
+  test('switching sound on or off passes with whether it is on', () => {
+    assert.deepEqual(
+      [
+        allowedEvent({ name: 'sound_changed', properties: { on: true } }),
+        allowedEvent({ name: 'sound_changed', properties: { on: false } }),
+      ],
+      [
+        { name: 'sound_changed', properties: { on: true } },
+        { name: 'sound_changed', properties: { on: false } },
+      ],
+    );
+  });
+
+  test('a sound change that is not a plain true or false loses the value', () => {
+    const event = { name: 'sound_changed', properties: { on: 'yes', volume: 3 } };
+
+    assert.deepEqual(allowedEvent(event), { name: 'sound_changed', properties: {} });
+  });
+
   test('a number where a kind of skin is expected is removed', () => {
     const event = { name: 'skin_changed', properties: { kind: 3 } };
 

@@ -5,7 +5,7 @@
 // Modules do not know about this file: the composition root (main.tsx) sends the events.
 import { z } from 'zod';
 import type { FeatureEvent } from '../game/client.tsx';
-import { analyticsAllowed, scrubEvent } from './analytics-policy.ts';
+import { analyticsAllowed, scrubEvent, tagApp } from './analytics-policy.ts';
 import { POSTHOG_SDK } from './posthog-sdk.ts';
 import { readOptedOut, writeOptedOut } from './usage-preference.ts';
 
@@ -80,8 +80,9 @@ function sdkConfig(base: string): Record<string, unknown> {
     disable_surveys: true,
     disable_external_dependency_loading: true,
     respect_dnt: true,
-    // The last word on every event: nothing after an opt-out, and no web address with a nickname.
-    before_send: (event: unknown) => (optedOut() ? null : scrubEvent(event)),
+    // The last word on every event: nothing after an opt-out, no web address with a nickname, and
+    // the app's name (the analytics project is shared with other sites).
+    before_send: (event: unknown) => (optedOut() ? null : tagApp(scrubEvent(event))),
   };
 }
 

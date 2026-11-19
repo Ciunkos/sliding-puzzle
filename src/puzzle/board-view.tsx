@@ -34,6 +34,10 @@ interface BoardViewProps {
   game: SavedGame<PuzzleState>;
   onMove: (tile: number) => void;
   look?: BoardLook;
+  /** A tap or key on an open game that moves nothing; `tile` is the one meant, if any. */
+  onBlocked?: (tile: number | undefined) => void;
+  /** The tile to wiggle (it could not move); a new serial wiggles it again. */
+  nudge?: { tile: number; serial: number } | undefined;
 }
 
 /** The visible face of a tile: its number, or its square of the picture with an optional badge. */
@@ -57,6 +61,8 @@ function TileButton(props: {
   size: Size;
   tabStop: boolean;
   look: BoardLook;
+  /** 'a' or 'b' (they take turns, so the wiggle starts again) while it wiggles. */
+  nudge?: 'a' | 'b' | undefined;
 }): ReactElement {
   const { tile, size } = props;
   return (
@@ -65,6 +71,7 @@ function TileButton(props: {
       className="sp-tile"
       data-testid={`tile-${String(tile.tile)}`}
       data-tile={tile.tile}
+      data-nudge={props.nudge}
       aria-label={`Tile ${String(tile.tile)}`}
       aria-disabled={!tile.movable}
       tabIndex={props.tabStop ? 0 : -1}
@@ -91,9 +98,21 @@ function Blank(props: { size: Size; finished: boolean; look: BoardLook; at: Plac
   );
 }
 
-export function BoardView({ game, onMove, look = NUMBERS }: BoardViewProps): ReactElement {
+/** Which wiggle a tile plays: none, or 'a' and 'b' by turns for each new nudge of it. */
+export function nudgeOf(nudge: BoardViewProps['nudge'], tile: number): 'a' | 'b' | undefined {
+  if (nudge?.tile !== tile) return undefined;
+  return nudge.serial % 2 === 0 ? 'a' : 'b';
+}
+
+export function BoardView({
+  game,
+  onMove,
+  look = NUMBERS,
+  onBlocked,
+  nudge,
+}: BoardViewProps): ReactElement {
   const view = layout(game);
-  const input = useBoardInput(game.state.board, game.finished, onMove);
+  const input = useBoardInput(game.state.board, game.finished, onMove, onBlocked);
   return (
     <div
       ref={input.ref}
@@ -119,6 +138,7 @@ export function BoardView({ game, onMove, look = NUMBERS }: BoardViewProps): Rea
           size={view.size}
           tabStop={tile.tile === input.tabStop}
           look={look}
+          nudge={nudgeOf(nudge, tile.tile)}
         />
       ))}
     </div>

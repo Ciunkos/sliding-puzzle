@@ -6,10 +6,11 @@ import { z } from 'zod';
 import { photoMessage } from './photo.ts';
 import {
   type Look,
-  readLook,
   readPhoto,
+  readStoredLook,
   removePhoto,
   SKIN_IDS,
+  startLook,
   writeLook,
   writePhoto,
 } from './preferences.ts';
@@ -46,11 +47,16 @@ export interface LookChoices {
   onRemovePhoto: () => void;
 }
 
-function useStoredLook(): [Look, (change: Partial<Look>) => void] {
-  const [look, setLook] = useState<Look>(() => readLook(storage()));
+/**
+ * The look chosen in this browser, or the nickname's start look until there is a choice. The first
+ * change keeps the whole look, so from then on it is this browser's choice for every profile.
+ */
+function useStoredLook(nickname: string): [Look, (change: Partial<Look>) => void] {
+  const [chosen, setChosen] = useState<Look | undefined>(() => readStoredLook(storage()));
+  const look = chosen ?? startLook(nickname);
   const update = (change: Partial<Look>) => {
-    setLook((current) => {
-      const next = { ...current, ...change };
+    setChosen((current) => {
+      const next = { ...(current ?? startLook(nickname)), ...change };
       writeLook(storage(), next);
       return next;
     });
@@ -87,13 +93,15 @@ function usePhoto(update: (change: Partial<Look>) => void): PhotoChoices {
       removePhoto(storage());
       setPhoto(undefined);
       setPhotoNote(undefined);
+      // Back to plain numbers: an explicit step back, the same whichever profile is open.
       update({ skin: 'numbers' });
     },
   };
 }
 
-export function useLook(): LookChoices {
-  const [look, update] = useStoredLook();
+/** The look for `nickname`'s screen (the nickname picks the start picture). */
+export function useLook(nickname: string): LookChoices {
+  const [look, update] = useStoredLook(nickname);
   return {
     look,
     ...usePhoto(update),
