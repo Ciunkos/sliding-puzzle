@@ -117,6 +117,29 @@ describe('scrubEvent', () => {
   });
 });
 
+/** When the SDK stamps an event: a Date object, not text. */
+const SENT_AT = new Date('2026-11-19T09:00:00.000Z');
+
+describe('scrubEvent and tagApp on what the SDK really sends', () => {
+  test('the timestamp, a Date, is still that Date after scrubbing and tagging', () => {
+    const event = { event: 'page_view', properties: {}, timestamp: SENT_AT };
+
+    const sent = tagApp(scrubEvent(event));
+
+    assert.deepEqual(sent, {
+      event: 'page_view',
+      properties: { app: 'sliding-puzzle' },
+      timestamp: SENT_AT,
+    });
+  });
+
+  test('a Date inside the properties is kept as it is', () => {
+    const event = { event: 'page_view', properties: { $time: SENT_AT } };
+
+    assert.deepEqual(scrubEvent(event), { event: 'page_view', properties: { $time: SENT_AT } });
+  });
+});
+
 describe('tagApp', () => {
   test('every event names this app, beside the properties it already has', () => {
     assert.deepEqual(tagApp({ event: 'game_solved', properties: { size: 4, moves: 80 } }), {

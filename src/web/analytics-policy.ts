@@ -40,8 +40,12 @@ export function scrubUrl(value: string): string {
   return isAppPath(url.pathname) ? `${url.origin}${APP_PATH}` : url.origin;
 }
 
+/**
+ * A plain object only. The SDK's event also holds a Date (its timestamp); treating that as a record
+ * would rebuild it as `{}`, and PostHog refuses an event without a readable time.
+ */
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+  typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype;
 
 /** Every string scrubbed, one level of nested objects too ($set, $set_once). */
 function scrubValues(record: Record<string, unknown>, depth: number): Record<string, unknown> {
