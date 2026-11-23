@@ -13,8 +13,11 @@ import {
 import {
   boardEdge,
   pull,
+  rendersOf,
   renders,
+  resetRendered,
   commitBatches,
+  countComponentRenders,
   countRenders,
   dragTo,
   flickDown,
@@ -250,4 +253,55 @@ test('a slow drag renders the page only when the tile is taken and let go, not p
 
   // Taking the tile (its held class and data-held) is one render; 12 moves add none.
   expect(during).toBeLessThanOrEqual(2);
+});
+
+/** The known game, one move made and the screen settled (the 3D board loaded): renders counted from here. */
+async function countAfterOneMove(page: Page, request: APIRequestContext) {
+  await countComponentRenders(page);
+  await startKnownGame(page, request, uniqueNickname());
+  await tile(page, 11).click();
+  await expect(page.getByTestId('scene')).toHaveAttribute('data-webgl', 'ready', {
+    timeout: 30_000,
+  });
+  await page.waitForTimeout(500);
+  await resetRendered(page);
+}
+
+test('a running game renders only its clock each second: not the screen, stage or board', async ({
+  page,
+  request,
+}) => {
+  await countAfterOneMove(page, request);
+
+  await page.waitForTimeout(3000);
+
+  expect(
+    await rendersOf(page, ['PuzzleScreen', 'StageDraw', 'BoardViewDraw', 'MenuPanelDraw']),
+  ).toEqual([0, 0, 0, 0]);
+});
+
+test('a tap renders the stage and the board once, the closed menu never', async ({
+  page,
+  request,
+}) => {
+  await countAfterOneMove(page, request);
+
+  await tile(page, 11).click();
+  await page.waitForTimeout(800);
+
+  // The board is back where it began (tile 11 up again), drawn once for it.
+  await expect(board(page)).toHaveAttribute('data-board', KNOWN_BOARD);
+  expect(await rendersOf(page, ['StageDraw', 'BoardViewDraw', 'MenuPanelDraw'])).toEqual([1, 1, 0]);
+});
+
+test('a tap commits at most three times beyond the clock: the move and two saves', async ({
+  page,
+  request,
+}) => {
+  await countAfterOneMove(page, request);
+
+  await tile(page, 11).click();
+  await page.waitForTimeout(800);
+
+  expect((await rendersOf(page, ['(commits beyond the clock)']))[0]).toBeLessThanOrEqual(3);
 });

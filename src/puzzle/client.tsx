@@ -5,8 +5,10 @@
 import {
   Component,
   lazy,
+  memo,
   type ReactElement,
   type ReactNode,
+  type RefObject,
   Suspense,
   useCallback,
   useEffect,
@@ -172,17 +174,23 @@ function useBoardHandlers(session: Session, board: BoardHandlers) {
   return { onMove, onBlocked };
 }
 
-/** The board, or a square of the same size while the game loads; the 3D board under it. */
-function Stage(props: {
-  session: Session;
+interface StageProps {
+  game: Game | undefined;
+  message: string | undefined;
   look: BoardLook;
   scene: SceneProps | undefined;
   shake: Shake;
-  board: BoardHandlers;
-}): ReactElement {
-  const { game, message } = props.session;
+  /** The stage element: the shake is cleared on it once it has played (use-shake.ts). */
+  stageRef: RefObject<HTMLDivElement | null>;
+  nudge: Nudge;
+  onMove: (tile: number) => void;
+  onBlocked: (tile: number | undefined) => void;
+}
+
+/** The board, or a square of the same size while the game loads; the 3D board under it. */
+function StageDraw(props: StageProps): ReactElement {
+  const { game, message, nudge } = props;
   const { held, onDrag } = useStageHeld();
-  const { onMove, onBlocked } = useBoardHandlers(props.session, props.board);
   if (game === undefined) {
     return (
       <div className="sp-stage">
@@ -192,10 +200,9 @@ function Stage(props: {
       </div>
     );
   }
-  const { nudge } = props.board;
   return (
     // data-held: the held tile the 3D board is given (e2e checks it goes with the move).
-    <div className="sp-stage" data-shake={props.shake} data-held={held}>
+    <div ref={props.stageRef} className="sp-stage" data-shake={props.shake} data-held={held}>
       {props.scene === undefined ? null : <Scene3D scene={{ ...props.scene, nudge }} game={game} />}
       {/* Keyed by size: a new size gets new tiles instead of sliding them out of the old board. */}
       <BoardView
@@ -203,13 +210,45 @@ function Stage(props: {
         game={game}
         look={props.look}
         nudge={nudge}
-        onBlocked={onBlocked}
+        onBlocked={props.onBlocked}
         onDrag={onDrag}
-        onMove={onMove}
+        onMove={props.onMove}
       />
     </div>
   );
 }
+
+/** What the stage draws of a game: a game saved again (a new version, the clock) draws nothing new. */
+function drawnGame(game: Game | undefined): string {
+  if (game === undefined) return '';
+  return [game.startedAt, game.moves, game.finished, game.state.board.join()].join('|');
+}
+
+/**
+ * What the 3D board is drawn with; its onReady and onLost only set the screen's state, so a new
+ * function doing the same is not a change.
+ */
+function drawnScene(scene: SceneProps | undefined): unknown[] {
+  if (scene === undefined) return [];
+  return [scene.surface, JSON.stringify([scene.skin, scene.dark, scene.reducedMotion, scene.tilt])];
+}
+
+const STAGE_SAME = ['message', 'shake', 'stageRef', 'nudge', 'onMove', 'onBlocked'] as const;
+
+function sameStage(a: StageProps, b: StageProps): boolean {
+  const [aSurface, aLooks] = drawnScene(a.scene);
+  const [bSurface, bLooks] = drawnScene(b.scene);
+  return (
+    drawnGame(a.game) === drawnGame(b.game) &&
+    JSON.stringify(a.look) === JSON.stringify(b.look) &&
+    aSurface === bSurface &&
+    aLooks === bLooks &&
+    STAGE_SAME.every((name) => a[name] === b[name])
+  );
+}
+
+/** The stage renders only when what it draws changes: not for the HUD's text, the hint or a save. */
+const Stage = memo(StageDraw, sameStage);
 
 /** The board in the middle of the screen, as large as fits. */
 function Arena(props: {
@@ -220,6 +259,8 @@ function Arena(props: {
 }): ReactElement {
   const { session } = props;
   const { game } = session;
+  const stage = useRef<HTMLDivElement>(null);
+  const { onMove, onBlocked } = useBoardHandlers(session, props.board);
   const shake = useShake(
     game === undefined
       ? undefined
@@ -229,15 +270,20 @@ function Arena(props: {
           moves: game.moves,
           finished: game.finished,
         },
+    stage,
   );
   return (
     <div className="sp-arena">
       <Stage
-        session={session}
+        game={game}
+        message={session.message}
         look={props.look}
         scene={props.scene}
         shake={shake}
-        board={props.board}
+        stageRef={stage}
+        nudge={props.board.nudge}
+        onMove={onMove}
+        onBlocked={onBlocked}
       />
     </div>
   );
@@ -252,11 +298,14 @@ function bestLines(session: Session): { title: string; lines: string[] } {
   return { title: `Best on ${sizeLabel(size)}`, lines: best.map(resultLine) };
 }
 
-/** The play time to show: ticking once a second while a started game is open. */
-function usePlayTime(session: Session): number {
-  const { game } = session;
+/**
+ * The play time, ticking once a second while a started game is open: its own small component, so
+ * a tick renders this text and nothing else of the screen.
+ */
+function PlayClock(props: { session: Session }): ReactElement {
+  const { game } = props.session;
   const playing = game !== undefined && !game.finished && game.moves > 0;
-  return session.elapsedMs(useNow(playing));
+  return <>{formatElapsed(props.session.elapsedMs(useNow(playing)))}</>;
 }
 
 function statusOf(surface: ReturnType<typeof useSceneSurface>): SceneStatus {
@@ -394,8 +443,12 @@ function usePuzzle(props: ScreenProps) {
   // reads them when a game starts, so the size is written into it just before each start.
   const [options] = useState<PuzzleOptions>(() => ({}));
   const session = useGameSession(api, props.nickname, options);
-  const elapsed = usePlayTime(session);
-  const requestedNewGame = useGameEvents(session.game, elapsed, props.onEvent);
+  // Read when an event is reported (a solved game's time), not as a clock that renders the screen.
+  const requestedNewGame = useGameEvents(
+    session.game,
+    () => session.elapsedMs(Date.now()),
+    props.onEvent,
+  );
   const current = session.game === undefined ? undefined : sizeOf(session.game.state.board);
   const startGame = (size: Size) => {
     if (session.busy) return;
@@ -403,7 +456,7 @@ function usePuzzle(props: ScreenProps) {
     requestedNewGame();
     session.start();
   };
-  return { session, elapsed, current, startGame };
+  return { session, current, startGame };
 }
 
 type Puzzle = ReturnType<typeof usePuzzle>;
@@ -505,11 +558,52 @@ function MenuContent(props: {
   );
 }
 
+type MenuPanelProps = Parameters<typeof MenuContent>[0] & { open: boolean; menu: MenuState };
+
+/** The menu dialog and its content. */
+function MenuPanelDraw(props: MenuPanelProps): ReactElement {
+  const { menu } = props;
+  return (
+    <Menu dialogRef={menu.dialog} onClose={menu.close}>
+      <MenuContent
+        shellMenu={props.shellMenu}
+        puzzle={props.puzzle}
+        sound={props.sound}
+        choices={props.choices}
+        screen={props.screen}
+        onPickSize={props.onPickSize}
+      />
+    </Menu>
+  );
+}
+
+/**
+ * Whether a closed menu would show the same: the board size, the best results, the look, the
+ * sound switches and the page's own part. A move of the game behind it changes none of these.
+ */
+function sameClosedMenu(a: MenuPanelProps, b: MenuPanelProps): boolean {
+  return (
+    a.puzzle.current === b.puzzle.current &&
+    bestLines(a.puzzle.session).lines.join() === bestLines(b.puzzle.session).lines.join() &&
+    JSON.stringify(a.choices.look) === JSON.stringify(b.choices.look) &&
+    a.choices.photo === b.choices.photo &&
+    a.choices.photoNote === b.choices.photoNote &&
+    a.sound.preferences === b.sound.preferences &&
+    a.shellMenu === b.shellMenu
+  );
+}
+
+/**
+ * Closed, the menu is not on screen and takes no input: it renders when it opens (showModal and
+ * the open state come in one event) or when something it shows changed, not on every move of the
+ * game behind it, so its content is never stale.
+ */
+const MenuPanel = memo(MenuPanelDraw, (a, b) => !a.open && !b.open && sameClosedMenu(a, b));
+
 /** The top corners and centre: the menu button, moves and time, and the sound button. */
 function TopBar(props: {
   menu: MenuState;
   session: Session;
-  elapsed: number;
   sound: Sound;
   actions: Actions;
 }): ReactElement {
@@ -520,7 +614,7 @@ function TopBar(props: {
       <MenuButton buttonRef={menu.button} open={menu.open} onOpen={props.actions.openMenu} />
       <Status
         moves={session.game === undefined ? undefined : statusText(session.game)}
-        time={formatElapsed(props.elapsed)}
+        time={<PlayClock session={session} />}
         saving={saving}
       />
       <SoundButton muted={props.sound.preferences.muted} onToggle={props.actions.toggleSound} />
@@ -537,24 +631,18 @@ function Hud(props: {
   actions: Actions;
   board: BoardHandlers;
 }): ReactElement {
-  const { session, elapsed } = props.puzzle;
+  const { session } = props.puzzle;
   const { actions } = props;
   return (
     <div className="sp-screen">
-      <TopBar
-        menu={props.menu}
-        session={session}
-        elapsed={elapsed}
-        sound={props.sound}
-        actions={actions}
-      />
+      <TopBar menu={props.menu} session={session} sound={props.sound} actions={actions} />
       <Arena
         session={session}
         look={props.screen.board}
         scene={props.screen.scene}
         board={props.board}
       />
-      <Won session={session} elapsed={elapsed} onPlayAgain={actions.newGame} />
+      <Won session={session} onPlayAgain={actions.newGame} />
       <BottomBar session={session} actions={actions} />
     </div>
   );
@@ -564,13 +652,20 @@ function Hud(props: {
  * The win card, once the game is solved: in the line's place under the board (free once solved),
  * so it never covers the solved picture. After the board in the DOM, so Tab reaches it next.
  */
-function Won(props: { session: Session; elapsed: number; onPlayAgain: () => void }) {
-  const { game, results, busy } = props.session;
+function Won(props: { session: Session; onPlayAgain: () => void }) {
+  const { game } = props.session;
   if (game?.finished !== true) return null;
+  return <WonCard session={props.session} game={game} onPlayAgain={props.onPlayAgain} />;
+}
+
+/** The card itself: it reads the time once when it appears (a solved game's time stands still). */
+function WonCard(props: { session: Session; game: Game; onPlayAgain: () => void }) {
+  const { results, busy } = props.session;
+  const elapsed = props.session.elapsedMs(useNow(false));
   return (
     <WinCard
-      banner={solvedText(game)}
-      result={resultText(props.elapsed, isNewPersonalBest(results, game))}
+      banner={solvedText(props.game)}
+      result={resultText(elapsed, isNewPersonalBest(results, props.game))}
       busy={busy}
       onPlayAgain={props.onPlayAgain}
     />
@@ -646,16 +741,16 @@ function PuzzleScreen(props: ScreenProps): ReactElement {
         actions={actions}
         board={board}
       />
-      <Menu dialogRef={menu.dialog} onClose={menu.close}>
-        <MenuContent
-          shellMenu={props.shellMenu}
-          puzzle={puzzle}
-          sound={sound}
-          choices={choices}
-          screen={screen}
-          onPickSize={actions.pickSize}
-        />
-      </Menu>
+      <MenuPanel
+        open={menu.open}
+        menu={menu}
+        shellMenu={props.shellMenu}
+        puzzle={puzzle}
+        sound={sound}
+        choices={choices}
+        screen={screen}
+        onPickSize={actions.pickSize}
+      />
       <p role="status" data-testid="announcer" className="sp-visually-hidden">
         {announced}
       </p>

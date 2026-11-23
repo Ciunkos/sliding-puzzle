@@ -4,22 +4,24 @@ import { useEffect, useState } from 'react';
 import { SAVING_SHOWN_AFTER_MS, showSaving } from './view-model.ts';
 
 export function useSavingHint(syncing: boolean): boolean {
-  const [since, setSince] = useState<number | undefined>(undefined);
-  const [now, setNow] = useState(() => Date.now());
+  // When saving began (undefined: it is not saving) and the time last looked at.
+  const [clock, setClock] = useState<{ since: number | undefined; now: number }>(() => ({
+    since: undefined,
+    now: Date.now(),
+  }));
+  if (syncing !== (clock.since !== undefined)) {
+    // Set while rendering: React renders again at once, so the hint costs no commit of its own.
+    const at = Date.now();
+    setClock({ since: syncing ? at : undefined, now: at });
+  }
   useEffect(() => {
-    if (!syncing) {
-      setSince(undefined);
-      return undefined;
-    }
-    const start = Date.now();
-    setSince(start);
-    setNow(start);
+    if (!syncing) return undefined;
     const timer = setTimeout(() => {
-      setNow(Date.now());
+      setClock((was) => ({ since: was.since, now: Date.now() }));
     }, SAVING_SHOWN_AFTER_MS);
     return () => {
       clearTimeout(timer);
     };
   }, [syncing]);
-  return showSaving(since, now);
+  return showSaving(clock.since, clock.now);
 }

@@ -2,7 +2,7 @@
 // the line under the board, the two actions in the bottom corners, and the win card over the board.
 // Presentational: every text and handler comes from the screen (client.tsx). Nothing here takes
 // room that something appearing later would need, so nothing ever moves (styles.ts).
-import { type ReactElement, type Ref, useId } from 'react';
+import { type ReactElement, type ReactNode, type Ref, useId } from 'react';
 
 /** The top-left corner: opens the menu (a dialog with the profile and every option). */
 export function MenuButton(props: {
@@ -35,7 +35,8 @@ export function MenuButton(props: {
  */
 export function Status(props: {
   moves: string | undefined;
-  time: string;
+  /** The play time: text, or the small component that keeps it ticking. */
+  time: ReactNode;
   saving: boolean;
 }): ReactElement {
   return (

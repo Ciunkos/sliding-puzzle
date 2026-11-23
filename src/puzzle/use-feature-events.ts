@@ -8,12 +8,13 @@ import type { SkinId } from './preferences.ts';
 type OnEvent = ((event: FeatureEvent) => void) | undefined;
 
 /**
- * Reports a started and a solved game. Returns what the screen calls when the player asks for a new
- * game, so the game that arrives next is known to be theirs.
+ * Reports a started and a solved game (`elapsedAt` gives the play time when one is reported).
+ * Returns what the screen calls when the player asks for a new game, so the game that arrives
+ * next is known to be theirs.
  */
 export function useGameEvents(
   game: SavedGame<PuzzleState> | undefined,
-  elapsedMs: number,
+  elapsedAt: () => number,
   onEvent: OnEvent,
 ): () => void {
   const previous = useRef<SavedGame<PuzzleState> | undefined>(undefined);
@@ -24,12 +25,12 @@ export function useGameEvents(
       previous: previous.current,
       current: game,
       requested: requested.current,
-      elapsedMs,
+      elapsedMs: elapsedAt(),
     });
     previous.current = game;
     if (events.some((event) => event.name === 'game_started')) requested.current = false;
     events.forEach((event) => onEvent?.(event));
-  }, [game, elapsedMs, onEvent]);
+  }, [game, onEvent]);
   return () => {
     requested.current = true;
   };

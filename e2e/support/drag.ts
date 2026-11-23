@@ -164,3 +164,114 @@ export async function countRenders(page: Page): Promise<void> {
 export function renders(page: Page): Promise<number> {
   return page.evaluate(() => Number(Reflect.get(window, 'reactCommits')));
 }
+
+/**
+ * Records the pitch of every tone the page's sound schedules (wrapping the browser's own
+ * OscillatorNode, which still plays). Call before the page loads; read with `tones`.
+ */
+export async function recordTones(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const scheduled: number[] = [];
+    Reflect.set(window, 'scheduledTones', scheduled);
+    const Real = window.OscillatorNode;
+    class Recorded extends Real {
+      constructor(context: BaseAudioContext, options?: OscillatorOptions) {
+        super(context, options);
+        const set = this.frequency.setValueAtTime.bind(this.frequency);
+        this.frequency.setValueAtTime = (value: number, at: number) => {
+          scheduled.push(Math.round(value));
+          return set(value, at);
+        };
+      }
+    }
+    Reflect.set(window, 'OscillatorNode', Recorded);
+  });
+}
+
+/** The pitches (Hz, rounded) scheduled so far (see recordTones). */
+export function tones(page: Page): Promise<number[]> {
+  return page.evaluate(() => Reflect.get(window, 'scheduledTones') as number[]);
+}
+
+/** Whether every pitch of `wanted` has been scheduled (see recordTones). */
+export async function scheduled(page: Page, wanted: readonly number[]): Promise<boolean> {
+  const heard = await tones(page);
+  return wanted.every((tone) => heard.includes(tone));
+}
+
+/**
+ * Counts, per component name, how often each rendered in a commit, and the commits that rendered
+ * more than the play clock: React flags every fiber it rendered (PerformedWork), and the hook
+ * walks the committed tree. Names are those of the dev
+ * build the e2e projects run. Call before the page loads; read with `renderedBy`, reset with
+ * `resetRendered`.
+ */
+export async function countComponentRenders(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const counts: Record<string, number> = {};
+    Reflect.set(window, 'componentRenders', counts);
+    interface Fiber {
+      flags: number;
+      type: unknown;
+      child: Fiber | null;
+      sibling: Fiber | null;
+    }
+    // A function component's name; a memo's wrapper is skipped (its inner component is counted).
+    const nameOf = (type: unknown): string | undefined =>
+      typeof type === 'function' ? (type as { name?: string }).name : undefined;
+    // A subtree React skipped keeps its fibers (and their old flags) from the commit before: only
+    // a flagged fiber that was not in the previous commit rendered in this one.
+    let previous = new WeakSet<Fiber>();
+    let seen = new WeakSet<Fiber>();
+    /** Counts the components rendered under `fiber`; returns how many were not the clock. */
+    const walk = (fiber: Fiber | null): number => {
+      let beyondClock = 0;
+      for (let node = fiber; node !== null; node = node.sibling) {
+        seen.add(node);
+        const rendered = (node.flags & 1) === 1 && !previous.has(node);
+        const name = rendered ? nameOf(node.type) : undefined;
+        if (name !== undefined && name !== '') counts[name] = (counts[name] ?? 0) + 1;
+        if (name !== undefined && name !== '' && name !== 'PlayClock') beyondClock += 1;
+        beyondClock += walk(node.child);
+      }
+      return beyondClock;
+    };
+    Reflect.set(window, '__REACT_DEVTOOLS_GLOBAL_HOOK__', {
+      supportsFiber: true,
+      renderers: new Map(),
+      inject: () => 1,
+      checkDCE: () => undefined,
+      onScheduleFiberRoot: () => undefined,
+      onCommitFiberUnmount: () => undefined,
+      onPostCommitFiberRoot: () => undefined,
+      onCommitFiberRoot: (_id: number, root: { current: Fiber }) => {
+        counts['(commits)'] = (counts['(commits)'] ?? 0) + 1;
+        if (walk(root.current.child) > 0)
+          counts['(commits beyond the clock)'] = (counts['(commits beyond the clock)'] ?? 0) + 1;
+        previous = seen;
+        seen = new WeakSet<Fiber>();
+      },
+    });
+  });
+}
+
+/** The renders per component name since the last reset (see countComponentRenders). */
+export function renderedBy(page: Page): Promise<Record<string, number>> {
+  return page.evaluate(() => ({
+    ...(Reflect.get(window, 'componentRenders') as Record<string, number>),
+  }));
+}
+
+/** Starts counting renders afresh. */
+export async function resetRendered(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const counts = Reflect.get(window, 'componentRenders') as Record<string, number>;
+    for (const name of Object.keys(counts)) Reflect.deleteProperty(counts, name);
+  });
+}
+
+/** How often each of `names` rendered since the last reset, 0 for none. */
+export async function rendersOf(page: Page, names: readonly string[]): Promise<number[]> {
+  const counts = await renderedBy(page);
+  return names.map((name) => counts[name] ?? 0);
+}
