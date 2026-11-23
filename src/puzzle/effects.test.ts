@@ -35,9 +35,16 @@ describe('springAt', () => {
     assert.ok(springAt(3.410605131648481e-13) <= springAt(5.684341886080801e-13));
   });
 
-  test('a microsecond in, the spring has gone omega squared t squared over 2, to 1e-9', () => {
-    // 0.033^2 * 0.001^2 / 2 = 5.445e-10; the next term, -zeta omega^3 t^3 / 3, is 1e-14 of it.
-    assert.ok(Math.abs(springAt(0.001) - 5.445e-10) < 5.445e-10 * 1e-4);
+  // Known answers to 1e-13: 1 - e^(-at)(cos bt + a/b sin bt) at 60 digits (Python decimal, a
+  // one-off script outside this code base), a = 0.7 * 0.033, b = 0.033 * sqrt(1 - 0.49).
+  test('a microsecond in, the spring is where the exact curve is, to 1e-13 of it', () => {
+    assert.ok(Math.abs(springAt(0.001) / 5.44491614747436847e-10 - 1) < 1e-13);
+  });
+
+  test('on both sides of where its series hand over (42, 42.9, 43.5 µs) the spring is exact', () => {
+    assert.ok(Math.abs(springAt(0.042) / 9.59876897505001953e-7 - 1) < 1e-13);
+    assert.ok(Math.abs(springAt(0.0429) / 1.00144135614654659e-6 - 1) < 1e-13);
+    assert.ok(Math.abs(springAt(0.0435) / 1.02964007670492111e-6 - 1) < 1e-13);
   });
 
   test('a spring slide has not started at or before 0 ms and is exactly there from 300 ms on', () => {

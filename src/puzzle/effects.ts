@@ -14,18 +14,21 @@ export const SETTLE_MS = 300;
 /** About when a sliding cube first reaches its cell (the spring crosses 1): the landing. */
 export const IMPACT_MS = 100;
 
-/** Below this, the two differences below are taken from their series (exact to 1e-15). */
+/** Below this, the two differences below are taken from their series. */
 const SMALL = 1e-3;
 
-/** e^x - 1 - x without cancelling: near 0 both sides are almost x, so its series is used there. */
+/**
+ * e^x - 1 - x for x >= 0 without cancelling: near 0 both sides are almost x, so its series is used
+ * there, to the term below which nothing shows in a double.
+ */
 function expm1Less(x: number): number {
-  if (Math.abs(x) < SMALL) return ((x * x) / 2) * (1 + (x / 3) * (1 + (x / 4) * (1 + x / 5)));
+  if (x < SMALL) return ((x * x) / 2) * (1 + (x / 3) * (1 + (x / 4) * (1 + x / 5)));
   return Math.expm1(x) - x;
 }
 
-/** x - sin x without cancelling, the same way. */
+/** x - sin x for x >= 0 without cancelling, the same way. */
 function sinLess(x: number): number {
-  if (Math.abs(x) < SMALL) return ((x * x * x) / 6) * (1 - ((x * x) / 20) * (1 - (x * x) / 42));
+  if (x < SMALL) return ((x * x * x) / 6) * (1 - (x * x) / 20);
   return x - Math.sin(x);
 }
 
