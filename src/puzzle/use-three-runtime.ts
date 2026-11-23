@@ -21,6 +21,7 @@ import {
 } from 'three';
 import { celebrationSeed, type ConfettiPiece, confettiAt, createConfetti } from './confetti.ts';
 import {
+  aheadShare,
   createDust,
   DUST_MS,
   type DustMote,
@@ -33,6 +34,7 @@ import {
   shakeAt,
   squashAt,
   WIGGLE_MS,
+  wallFade,
   wiggleAt,
   WIN_KICK,
 } from './effects.ts';
@@ -124,6 +126,10 @@ const CONFETTI_COUNT = 140;
 const DUST_COUNT = 24;
 /** The puff in board widths is scaled up this much: it billows out of the gap and over the cubes. */
 const DUST_BILLOW = 4;
+/** The farthest a puff drifts ahead of its edge: the fastest mote's 0.14 x 0.16 s, billowed. */
+const DUST_REACH = 0.14 * 0.16 * DUST_BILLOW;
+/** How far inside the wall a puff blocked by it starts: where its motes are full size (wallFade). */
+const DUST_WALL_GAP = 0.06;
 const DEG = Math.PI / 180;
 /** Seeds of the planks: fixed, so a board always shows the same wood. */
 const TILE_SEED = 1907;
@@ -543,16 +549,21 @@ function stepDust(parts: Parts, state: State, now: number): boolean {
     return false;
   }
   const side = { x: -dust.ahead.y, y: dust.ahead.x };
+  // Against the rim a puff has no room ahead: it starts a little inside and bounces back off the
+  // wall over the cube, and every mote shrinks away as it nears the wall, so nothing is cut by the
+  // rim or the edge of the picture.
+  const room = aheadShare(dust.origin, dust.ahead, DUST_REACH);
+  const drift = room * 2 - 1;
+  const back = (1 - room) * DUST_WALL_GAP;
   dust.motes.forEach((mote, i) => {
     const at = dustAt(mote, t);
     const along = mote.along * dust.width * 1.15 + at.across * DUST_BILLOW;
-    dummy.position.set(
-      dust.origin.x + dust.ahead.x * at.ahead * DUST_BILLOW + side.x * along,
-      dust.origin.y + dust.ahead.y * at.ahead * DUST_BILLOW + side.y * along,
-      0.003 + at.z * DUST_BILLOW,
-    );
+    const ahead = at.ahead * DUST_BILLOW * drift - back;
+    const x = dust.origin.x + dust.ahead.x * ahead + side.x * along;
+    const y = dust.origin.y + dust.ahead.y * ahead + side.y * along;
+    dummy.position.set(x, y, 0.003 + at.z * DUST_BILLOW);
     dummy.rotation.set(0, 0, 0);
-    dummy.scale.setScalar(at.scale);
+    dummy.scale.setScalar(at.scale * wallFade({ x, y }));
     dummy.updateMatrix();
     parts.dust.setMatrixAt(i, dummy.matrix);
   });
