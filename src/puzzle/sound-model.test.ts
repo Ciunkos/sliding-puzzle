@@ -389,3 +389,191 @@ describe('effect levels and lengths', () => {
     });
   });
 });
+
+/** The gap at the left of the top row: a push from the right end moves two blocks left. */
+const ROW_GAP_LEFT = grid`
+  _ 1 2
+  3 4 5
+  6 7 8
+`;
+const ROW_PUSHED_TWO = grid`
+  1 2 _
+  3 4 5
+  6 7 8
+`;
+const COLUMN_GAP_TOP = grid`
+  _ 2 3
+  1 5 6
+  4 7 8
+`;
+const COLUMN_PUSHED_TWO = grid`
+  1 2 3
+  4 5 6
+  _ 7 8
+`;
+const FOUR_GAP_LEFT = grid`
+   _  1  2  3
+   4  5  6  7
+   8  9 10 11
+  12 13 14 15
+`;
+const FOUR_PUSHED_THREE = grid`
+   1  2  3  _
+   4  5  6  7
+   8  9 10 11
+  12 13 14 15
+`;
+const FIVE_GAP_LEFT = grid`
+   _  1  2  3  4
+   5  6  7  8  9
+  10 11 12 13 14
+  15 16 17 18 19
+  20 21 22 23 24
+`;
+const FIVE_PUSHED_FOUR = grid`
+   1  2  3  4  _
+   5  6  7  8  9
+  10 11 12 13 14
+  15 16 17 18 19
+  20 21 22 23 24
+`;
+/** The gap two cells on along the row, but the blocks between not shifted one each. */
+const ROW_SCRAMBLED = grid`
+  2 1 _
+  3 4 5
+  6 7 8
+`;
+
+describe('gameSounds, a row pushed', () => {
+  test('a row of two pushed in one go is one push of two blocks', () => {
+    const cues = gameSounds(
+      game(ROW_GAP_LEFT, 3, false, START),
+      game(ROW_PUSHED_TWO, 5, false, START),
+    );
+
+    assert.deepEqual(cues, [{ effect: 'push', variation: 5, count: 2 }]);
+  });
+
+  test('a column of two pushed up is a push too', () => {
+    const cues = gameSounds(
+      game(COLUMN_GAP_TOP, 0, false, START),
+      game(COLUMN_PUSHED_TWO, 2, false, START),
+    );
+
+    assert.deepEqual(cues, [{ effect: 'push', variation: 2, count: 2 }]);
+  });
+
+  test('pushes of three and four blocks are one push each, counting the blocks', () => {
+    assert.deepEqual(
+      [
+        gameSounds(game(FOUR_GAP_LEFT, 0, false, START), game(FOUR_PUSHED_THREE, 3, false, START)),
+        gameSounds(game(FIVE_GAP_LEFT, 0, false, START), game(FIVE_PUSHED_FOUR, 4, false, START)),
+      ],
+      [[{ effect: 'push', variation: 3, count: 3 }], [{ effect: 'push', variation: 4, count: 4 }]],
+    );
+  });
+
+  test('the gap moved along a row with the blocks not each shifted by one is silent', () => {
+    const cues = gameSounds(
+      game(ROW_GAP_LEFT, 3, false, START),
+      game(ROW_SCRAMBLED, 5, false, START),
+    );
+
+    assert.deepEqual(cues, []);
+  });
+});
+
+/** The push of two blocks on the first wood: the slide's clack, lower and longer, and one tick. */
+const PUSH_2 = {
+  layers: [
+    {
+      kind: 'noise',
+      filter: 'bandpass',
+      frequency: 1710,
+      q: 1.6,
+      ...QUICK,
+      decay: 0.04,
+      gain: 0.36,
+    },
+    {
+      kind: 'noise',
+      filter: 'lowpass',
+      frequency: 600,
+      q: 0.7,
+      ...QUICK,
+      decay: 0.035,
+      gain: 0.16,
+    },
+    {
+      kind: 'tone',
+      wave: 'sine',
+      frequency: 192,
+      endFrequency: 163.2,
+      ...QUICK,
+      decay: 0.12,
+      gain: 0.28,
+    },
+    {
+      kind: 'tone',
+      wave: 'sine',
+      frequency: 530,
+      endFrequency: 530,
+      ...QUICK,
+      decay: 0.035,
+      gain: 0.05,
+    },
+    {
+      kind: 'noise',
+      filter: 'bandpass',
+      frequency: 2090,
+      q: 2,
+      start: 0.018,
+      attack: 0.002,
+      decay: 0.012,
+      gain: 0.045,
+    },
+  ],
+  duck: true,
+  vibrate: [12],
+};
+
+describe('effectRecipe, a push', () => {
+  test('a push of two is the clack with a lower, longer body and one short tick after it', () => {
+    assert.deepEqual(effectRecipe('push', 0, 2), PUSH_2);
+  });
+
+  test('a longer push is lower and heavier, with a tick per block after the first, three at most', () => {
+    const [, , body] = effectRecipe('push', 0, 4).layers;
+    assert.ok(body);
+
+    assert.deepEqual(
+      [
+        body.frequency,
+        body.decay,
+        effectRecipe('push', 0, 4).layers.length,
+        effectRecipe('push', 0, 6).layers.length,
+      ],
+      [168, 0.16, 7, 7],
+    );
+  });
+
+  test('every push fits the headroom without scaling', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 50 }),
+        fc.integer({ min: 2, max: 25 }),
+        (variation, count) => effectScale(effectRecipe('push', variation, count)) === 1,
+      ),
+    );
+  });
+
+  test('every push is over within a fifth of a second', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 0, max: 50 }),
+        fc.integer({ min: 2, max: 25 }),
+        (variation, count) => effectLength(effectRecipe('push', variation, count)) <= 0.2,
+      ),
+    );
+  });
+});

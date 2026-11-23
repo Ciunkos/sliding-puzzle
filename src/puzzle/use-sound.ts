@@ -373,11 +373,11 @@ interface Live {
   preferences: SoundPreferences;
 }
 
-function playOn(live: Live, effect: SoundEffect, variation: number): void {
+function playOn(live: Live, effect: SoundEffect, variation: number, count?: number): void {
   const { engine } = live;
   if (engine === undefined || !audible(live.preferences).effects) return;
   wake(engine);
-  const recipe = effectRecipe(effect, variation);
+  const recipe = effectRecipe(effect, variation, count);
   playEffect(engine.context, engine.mixer, recipe, engine.context.currentTime, engine.noise);
   vibrate(recipe.vibrate);
 }
@@ -426,7 +426,7 @@ function useGameSounds(live: Live, game: GameSnapshot | undefined): void {
     if (game === undefined) return;
     const cues = gameSounds(previous.current, game);
     previous.current = game;
-    for (const cue of cues) playOn(live, cue.effect, cue.variation);
+    for (const cue of cues) playOn(live, cue.effect, cue.variation, cue.count);
   }, [live, game]);
 }
 

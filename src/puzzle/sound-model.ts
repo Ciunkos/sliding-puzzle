@@ -13,6 +13,7 @@ import { applyMove } from './rules.ts';
 
 export const SOUND_EFFECTS = [
   'slide',
+  'push',
   'blocked',
   'win',
   'shuffle',
@@ -24,10 +25,11 @@ export const SOUND_EFFECTS = [
 ] as const;
 export type SoundEffect = (typeof SOUND_EFFECTS)[number];
 
-/** A sound to play: the effect, and a number (the move count) that varies it. */
+/** A sound to play: the effect, a number (the move count) that varies it, and for a push its blocks. */
 export interface SoundCue {
   effect: SoundEffect;
   variation: number;
+  count?: number;
 }
 
 /** The parts of a saved game a sound depends on (a SavedGame<PuzzleState> fits). */
@@ -96,16 +98,48 @@ function slidOnce(before: readonly number[], after: readonly number[]): boolean 
 }
 
 /**
+ * The blocks of a row or column pushed in one go from `before` to `after`: the gap moved two or
+ * more cells along one line, and each block between moved one cell into the place of the one
+ * before it. Undefined for anything else (one slide, or the server catching up by other moves).
+ */
+function pushedBlocks(before: readonly number[], after: readonly number[]): number | undefined {
+  const line = gapLine(before.indexOf(0), after.indexOf(0), Math.round(Math.sqrt(before.length)));
+  if (line === undefined) return undefined;
+  let board: readonly number[] | undefined = before;
+  for (let gap = line.from; gap !== line.to && board !== undefined; gap += line.step) {
+    board = applyMove(board, board[gap + line.step] ?? 0);
+  }
+  return board?.join() === after.join() ? line.blocks : undefined;
+}
+
+/**
+ * How the gap went from cell `from` to `to` on a board `size` wide: the step between cells (one
+ * along a row, `size` down a column) and the blocks it passed, when it went two or more cells
+ * along one row or column; undefined otherwise.
+ */
+function gapLine(from: number, to: number, size: number) {
+  const sameRow = Math.floor(from / size) === Math.floor(to / size);
+  const sameColumn = from % size === to % size;
+  if (!sameRow && !sameColumn) return undefined;
+  const step = (sameRow ? 1 : size) * Math.sign(to - from);
+  const blocks = step === 0 ? 0 : (to - from) / step;
+  return blocks < 2 ? undefined : { from, to, step, blocks };
+}
+
+/**
  * The sounds of the change from `before` (undefined on the first game shown) to `after`: a slide
- * for one move, the win when it turns solved, a shuffle for a new game or a reset (both start
- * again), nothing for a page load or the server catching up by several moves.
+ * for one move, a push for a row or column pushed in one go, the win when it turns solved, a
+ * shuffle for a new game or a reset (both start again), nothing for a page load or the server
+ * catching up by several moves.
  */
 export function gameSounds(before: GameSnapshot | undefined, after: GameSnapshot): SoundCue[] {
   if (before === undefined) return [];
   const variation = after.moves;
   if (before.startedAt !== after.startedAt) return [{ effect: 'shuffle', variation }];
   const cues: SoundCue[] = [];
+  const count = pushedBlocks(before.state.board, after.state.board);
   if (slidOnce(before.state.board, after.state.board)) cues.push({ effect: 'slide', variation });
+  else if (count !== undefined) cues.push({ effect: 'push', variation, count });
   if (!before.finished && after.finished) cues.push({ effect: 'win', variation });
   return cues;
 }
@@ -160,6 +194,54 @@ function slide(variation: number): EffectRecipe {
     ],
     duck: true,
     vibrate: [8],
+  };
+}
+
+/** The most blocks a push sounds heavier for, and the gap between its ticks (wood on wood). */
+const PUSH_MOST = 4;
+const PUSH_TICK = 0.018;
+
+/**
+ * A row pushed: the slide's clack on its wood, its body lower and longer the more blocks move,
+ * and a very short tick for each block after the first (at most three), not a roll.
+ */
+function push(variation: number, count: number): EffectRecipe {
+  const { click, body } = CLACKS[variation % CLACKS.length] ?? CLACKS[0];
+  const blocks = Math.min(PUSH_MOST, Math.max(2, count));
+  const low = Math.round(body * (0.9 - 0.05 * blocks));
+  const ticks = Array.from({ length: blocks - 1 }, (_, index) =>
+    noise('bandpass', Math.round(click * 1.1), 2, {
+      start: PUSH_TICK * (index + 1),
+      attack: ATTACK,
+      decay: 0.012,
+      gain: 0.045,
+    }),
+  );
+  return {
+    layers: [
+      noise('bandpass', Math.round(click * 0.9), 1.6, {
+        start: 0,
+        attack: ATTACK,
+        decay: 0.04,
+        gain: 0.36,
+      }),
+      noise('lowpass', 600, 0.7, { start: 0, attack: ATTACK, decay: 0.035, gain: 0.16 }),
+      tone('sine', low, Math.round(low * BODY_DROP * 10) / 10, {
+        start: 0,
+        attack: ATTACK,
+        decay: Math.round((0.08 + 0.02 * blocks) * 1000) / 1000,
+        gain: 0.28,
+      }),
+      tone('sine', Math.round(low * OVERTONE), Math.round(low * OVERTONE), {
+        start: 0,
+        attack: ATTACK,
+        decay: 0.035,
+        gain: 0.05,
+      }),
+      ...ticks,
+    ],
+    duck: true,
+    vibrate: [12],
   };
 }
 
@@ -235,8 +317,9 @@ const SHUFFLE: EffectRecipe = {
   vibrate: [],
 };
 
-const RECIPES: Record<SoundEffect, (variation: number) => EffectRecipe> = {
+const RECIPES: Record<SoundEffect, (variation: number, count: number) => EffectRecipe> = {
   slide,
+  push,
   blocked: () => BLOCKED,
   win: () => WIN,
   shuffle: () => SHUFFLE,
@@ -247,9 +330,12 @@ const RECIPES: Record<SoundEffect, (variation: number) => EffectRecipe> = {
   'toggle-off': () => step(990, 660),
 };
 
-/** The recipe of `effect`; `variation` (the move count) picks the wood of a slide. */
-export function effectRecipe(effect: SoundEffect, variation: number): EffectRecipe {
-  return RECIPES[effect](Math.abs(Math.trunc(variation)));
+/**
+ * The recipe of `effect`; `variation` (the move count) picks the wood of a slide or a push, and
+ * `count` is a push's blocks.
+ */
+export function effectRecipe(effect: SoundEffect, variation: number, count = 1): EffectRecipe {
+  return RECIPES[effect](Math.abs(Math.trunc(variation)), count);
 }
 
 /** Seconds until the last layer of `recipe` is silent. */
