@@ -14,14 +14,34 @@ export const SETTLE_MS = 300;
 /** About when a sliding cube first reaches its cell (the spring crosses 1): the landing. */
 export const IMPACT_MS = 100;
 
-/** Share of the way a spring slide has covered `t` ms after it started: overshoots past 1, ends at 1. */
+/** Below this, the two differences below are taken from their series (exact to 1e-15). */
+const SMALL = 1e-3;
+
+/** e^x - 1 - x without cancelling: near 0 both sides are almost x, so its series is used there. */
+function expm1Less(x: number): number {
+  if (Math.abs(x) < SMALL) return ((x * x) / 2) * (1 + (x / 3) * (1 + (x / 4) * (1 + x / 5)));
+  return Math.expm1(x) - x;
+}
+
+/** x - sin x without cancelling, the same way. */
+function sinLess(x: number): number {
+  if (Math.abs(x) < SMALL) return ((x * x * x) / 6) * (1 - ((x * x) / 20) * (1 - (x * x) / 42));
+  return x - Math.sin(x);
+}
+
+/**
+ * Share of the way a spring slide has covered `t` ms after it started: overshoots past 1, ends at 1.
+ * It is 1 - e^(-at) (cos bt + a/b sin bt), written as e^(-at) times a sum of three parts that are
+ * never negative, so its first instants are not lost to rounding (1 minus almost 1) and it never
+ * steps back on its way up.
+ */
 export function springAt(t: number): number {
   if (t <= 0) return 0;
   if (t >= SETTLE_MS) return 1;
-  const damped = OMEGA * Math.sqrt(1 - DAMPING * DAMPING);
-  const decay = Math.exp(-DAMPING * OMEGA * t);
-  const sway = Math.cos(damped * t) + ((DAMPING * OMEGA) / damped) * Math.sin(damped * t);
-  return 1 - decay * sway;
+  const a = DAMPING * OMEGA;
+  const b = OMEGA * Math.sqrt(1 - DAMPING * DAMPING);
+  const lead = expm1Less(a * t) + 2 * Math.sin((b * t) / 2) ** 2 + (a / b) * sinLess(b * t);
+  return Math.exp(-a * t) * lead;
 }
 
 /** The spring as a CSS `linear()` easing of `steps` equal parts, rounded to thousandths. */

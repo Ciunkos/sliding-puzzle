@@ -29,6 +29,17 @@ const TIME = fc.double({ min: -1000, max: 2000, noNaN: true });
 const STRENGTH = fc.double({ min: 0, max: 1, noNaN: true });
 
 describe('springAt', () => {
+  test('in its first instants the spring never falls back: 3.41e-13 ms in is not past 5.68e-13 ms', () => {
+    // The times of the counterexample fast-check found for the slide in scene-model.test.ts
+    // (5.1e-13 and 2.8e-13 ms after a start at 1000 ms, as the subtraction leaves them).
+    assert.ok(springAt(3.410605131648481e-13) <= springAt(5.684341886080801e-13));
+  });
+
+  test('a microsecond in, the spring has gone omega squared t squared over 2, to 1e-9', () => {
+    // 0.033^2 * 0.001^2 / 2 = 5.445e-10; the next term, -zeta omega^3 t^3 / 3, is 1e-14 of it.
+    assert.ok(Math.abs(springAt(0.001) - 5.445e-10) < 5.445e-10 * 1e-4);
+  });
+
   test('a spring slide has not started at or before 0 ms and is exactly there from 300 ms on', () => {
     assert.deepEqual(
       [springAt(-20), springAt(0), springAt(SETTLE_MS), springAt(1000)],
