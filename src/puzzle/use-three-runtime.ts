@@ -39,6 +39,8 @@ import {
 } from './effects.ts';
 import {
   type Cap,
+  describeFlags,
+  FRAME_FLAGS,
   firstFrameShift,
   type FrameReadout,
   frameLead,
@@ -235,6 +237,12 @@ interface FrameClock {
   chained: boolean;
   /** Recent frame intervals: all of them, and those drawn while cubes moved. */
   all: number[];
+  /** For each of `all`, what the frame before it did (FRAME_FLAGS): the work that made it late. */
+  flags: number[];
+  /** What the last frame did. */
+  did: number;
+  /** The drawing buffer was resized since the last frame. */
+  resized: boolean;
   moving: number[];
   /** Cubes moved in the last frame: the shadow map must be redrawn once more after they stop. */
   wasMoving: boolean;
@@ -385,7 +393,8 @@ function newState(size: Size, level: Quality): State {
 function newClock(level: Quality): FrameClock {
   return {
     ...{ level, applied: undefined, css: 0, dpr: 1, last: undefined, chained: false },
-    ...{ all: [], moving: [], wasMoving: true, shadowsStale: true, pulled: false, statsAt: 0 },
+    ...{ all: [], flags: [], did: 0, resized: false, moving: [], wasMoving: true },
+    ...{ shadowsStale: true, pulled: false, statsAt: 0 },
     renderer: undefined,
     cap: undefined,
   };
@@ -876,6 +885,7 @@ function fit(parts: Parts, state: State): void {
   if (css <= 0) return;
   parts.renderer.setPixelRatio(renderScale(css, dpr, level));
   parts.renderer.setSize(css, css, false);
+  state.frames.resized = true;
 }
 
 /**
@@ -934,11 +944,35 @@ function readout(parts: Parts, state: State): FrameReadout {
   clock.cap = holdCap(clock.cap, last);
   const gl = parts.renderer.getContext();
   clock.renderer ??= rendererName(gl);
+  const flags = clock.flags.slice(clock.flags.length - last.length);
+  const worst = last.indexOf(Math.max(...last));
   return {
     ...frameStats(last),
+    worstDuring: describeFlags(flags[worst] ?? 0),
     ...{ width: gl.drawingBufferWidth, height: gl.drawingBufferHeight },
     ...{ level: clock.level, cap: clock.cap, renderer: clock.renderer },
   };
+}
+
+function bit(on: boolean, value: number): number {
+  return on ? value : 0;
+}
+
+/** What a frame did, as FRAME_FLAGS, for the readout's worst frame. */
+function frameFlags(
+  parts: Parts,
+  did: { shadow: boolean; input: boolean; tilt: boolean; requalified: boolean; resized: boolean },
+): number {
+  // No arrays or closures: this runs every frame.
+  return (
+    bit(did.shadow, FRAME_FLAGS.shadow) |
+    bit(did.input, FRAME_FLAGS.input) |
+    bit(parts.dust.visible, FRAME_FLAGS.dust) |
+    bit(parts.confetti.visible, FRAME_FLAGS.effect) |
+    bit(did.tilt, FRAME_FLAGS.tilt) |
+    bit(did.resized, FRAME_FLAGS.resize) |
+    bit(did.requalified, FRAME_FLAGS.quality)
+  );
 }
 
 /** Keeps the frame's interval, judges the quality from frames of moving cubes, reports stats. */
@@ -946,6 +980,7 @@ function record(parts: Parts, state: State, options: RuntimeOptions, sample: Fra
   const clock = state.frames;
   if (sample.interval !== undefined) {
     keep(clock.all, sample.interval, KEPT_FRAMES);
+    keep(clock.flags, clock.did, KEPT_FRAMES);
     if (sample.cubes) keep(clock.moving, sample.interval, JUDGED_FRAMES);
   }
   if (clock.moving.length >= JUDGED_FRAMES) {
@@ -1002,7 +1037,7 @@ function step(parts: Parts, state: State, options: RuntimeOptions, now: number) 
   const tilt = stepTilt(parts, state, dt);
   const celebrating = celebrationTime(state, now) < CELEBRATION_MS;
   const busy = [tiles, corner, confetti, dust, camera, tilt].includes(true);
-  return { busy, cubes: tiles || corner || celebrating || state.frames.pulled };
+  return { busy, tilt, cubes: tiles || corner || celebrating || state.frames.pulled };
 }
 
 /**
@@ -1033,9 +1068,11 @@ function shiftEffects(state: State, later: (time: number) => number): void {
 function frame(parts: Parts, state: State, options: RuntimeOptions, now: number): boolean {
   const clock = state.frames;
   const interval = clock.chained && clock.last !== undefined ? now - clock.last : undefined;
+  const requalified = clock.applied !== clock.level;
+  const input = state.inputAt !== undefined;
   applyQuality(parts, state);
   catchUpInput(state, now);
-  const { busy, cubes } = step(parts, state, options, now);
+  const { busy, cubes, tilt } = step(parts, state, options, now);
   clock.pulled = false;
   // The shadow map is redrawn only when a cube moved (and once more after it stopped); a tilt
   // only moves its matrices (followShadow).
@@ -1043,8 +1080,12 @@ function frame(parts: Parts, state: State, options: RuntimeOptions, now: number)
   parts.renderer.shadowMap.needsUpdate = cubes || clock.wasMoving || clock.shadowsStale;
   clock.wasMoving = cubes;
   clock.shadowsStale = false;
+  // Read before the render: three clears needsUpdate once it has redrawn the map.
+  const shadow = parts.renderer.shadowMap.enabled && parts.renderer.shadowMap.needsUpdate;
   parts.renderer.render(parts.scene, parts.camera);
   record(parts, state, options, { now, interval, cubes });
+  clock.did = frameFlags(parts, { shadow, input, tilt, requalified, resized: clock.resized });
+  clock.resized = false;
   clock.last = now;
   clock.chained = busy || options.onStats !== undefined;
   state.last = busy ? now : undefined;

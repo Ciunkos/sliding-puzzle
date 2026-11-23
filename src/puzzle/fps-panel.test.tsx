@@ -8,6 +8,7 @@ const STATS = {
   fps: 60,
   median: 16.7,
   worst: 20,
+  worstDuring: 'dust',
   width: 860,
   height: 860,
   level: 1,
@@ -27,7 +28,7 @@ describe('FpsReadout', () => {
 
     assert.ok(
       html.includes(
-        '<div>60 fps (drawing every frame)</div><div>frame 16.7 ms, worst 20.0 ms</div><div>860 x 860 px, quality 1</div><div>capped at 60</div><div>Apple GPU</div>',
+        '<div>60 fps (drawing every frame)</div><div>frame 16.7 ms, worst 20.0 ms (dust)</div><div>860 x 860 px, quality 1</div><div>capped at 60</div><div>Apple GPU</div>',
       ),
     );
   });

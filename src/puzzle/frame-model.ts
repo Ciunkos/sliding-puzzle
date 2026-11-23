@@ -185,11 +185,40 @@ export function fpsWanted(search: string): boolean {
   return new URLSearchParams(search).has('fps');
 }
 
+/** What a frame did, as bits: so the readout can say what its worst frame coincided with. */
+export const FRAME_FLAGS = {
+  shadow: 1,
+  input: 2,
+  dust: 4,
+  effect: 8,
+  tilt: 16,
+  resize: 32,
+  quality: 64,
+} as const;
+
+const FLAG_NAMES: readonly [number, string][] = [
+  [FRAME_FLAGS.shadow, 'shadow redraw'],
+  [FRAME_FLAGS.input, 'after input'],
+  [FRAME_FLAGS.dust, 'dust'],
+  [FRAME_FLAGS.effect, 'confetti or win'],
+  [FRAME_FLAGS.tilt, 'tilt'],
+  [FRAME_FLAGS.resize, 'resize'],
+  [FRAME_FLAGS.quality, 'quality change'],
+];
+
+/** The work a frame's `flags` name, in a fixed order; "no work" for none. */
+export function describeFlags(flags: number): string {
+  const names = FLAG_NAMES.filter(([bit]) => (flags & bit) !== 0).map(([, name]) => name);
+  return names.length === 0 ? 'no work' : names.join(', ');
+}
+
 /** What the readout shows. */
 export interface FrameReadout {
   fps: number;
   median: number;
   worst: number;
+  /** What the worst frame's previous frame did (the work that made it late). */
+  worstDuring: string;
   width: number;
   height: number;
   level: Quality;
@@ -201,7 +230,7 @@ export interface FrameReadout {
 export function fpsLines(stats: FrameReadout): string[] {
   return [
     `${String(Math.round(stats.fps))} fps (drawing every frame)`,
-    `frame ${stats.median.toFixed(1)} ms, worst ${stats.worst.toFixed(1)} ms`,
+    `frame ${stats.median.toFixed(1)} ms, worst ${stats.worst.toFixed(1)} ms (${stats.worstDuring})`,
     `${String(stats.width)} x ${String(stats.height)} px, quality ${String(stats.level)}`,
     stats.cap === undefined ? 'no cap' : `capped at ${String(stats.cap)}`,
     stats.renderer,

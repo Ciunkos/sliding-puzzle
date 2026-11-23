@@ -3,7 +3,9 @@ import { describe, test } from 'node:test';
 import fc from 'fast-check';
 import { repeated } from '../test-support/scripted-rng.ts';
 import {
+  describeFlags,
   detectCap,
+  FRAME_FLAGS,
   firstFrameShift,
   frameLead,
   holdCap,
@@ -35,6 +37,7 @@ const READOUT = {
   fps: 59.6,
   median: 16.7,
   worst: 33.4,
+  worstDuring: 'shadow redraw, after input',
   width: 860,
   height: 860,
   level: 1,
@@ -251,11 +254,31 @@ describe('fpsWanted', () => {
   });
 });
 
+describe('describeFlags', () => {
+  test('a frame that did nothing special says so', () => {
+    assert.equal(describeFlags(0), 'no work');
+  });
+
+  test('a frame names what it did, in a fixed order', () => {
+    assert.equal(
+      describeFlags(FRAME_FLAGS.input | FRAME_FLAGS.shadow),
+      'shadow redraw, after input',
+    );
+  });
+
+  test('every kind of work has its name', () => {
+    assert.equal(
+      describeFlags(127),
+      'shadow redraw, after input, dust, confetti or win, tilt, resize, quality change',
+    );
+  });
+});
+
 describe('fpsLines', () => {
   test('the readout says the rate, frame times, buffer, quality, cap and renderer', () => {
     assert.deepEqual(fpsLines(READOUT), [
       '60 fps (drawing every frame)',
-      'frame 16.7 ms, worst 33.4 ms',
+      'frame 16.7 ms, worst 33.4 ms (shadow redraw, after input)',
       '860 x 860 px, quality 1',
       'capped at 60',
       'Apple GPU',
