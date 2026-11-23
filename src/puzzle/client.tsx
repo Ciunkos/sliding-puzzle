@@ -39,6 +39,7 @@ import { LookControls } from './look-controls.tsx';
 import {
   pictureDescription,
   sceneNote,
+  sceneRetry,
   type SceneStatus,
   sceneSkin,
   tiltMode,
@@ -147,8 +148,9 @@ interface BoardHandlers {
 }
 
 /**
- * The tile held by a drag, as the stage needs it (data-held): set when it is taken and let go, and
- * with a commit, never per move. The 3D board's cube follows the finger by itself (pullScene).
+ * The tile held by a drag, for the stage's data-held only (e2e reads it): set when it is taken and
+ * let go, and with a commit, never per move. The 3D board's cube follows the finger by itself
+ * (pullScene); nothing else reads this.
  */
 function useStageHeld() {
   const [held, setHeld] = useState<number | undefined>(undefined);
@@ -201,7 +203,7 @@ function StageDraw(props: StageProps): ReactElement {
     );
   }
   return (
-    // data-held: the held tile the 3D board is given (e2e checks it goes with the move).
+    // data-held: the tile a drag holds (e2e checks it goes with the move).
     <div ref={props.stageRef} className="sp-stage" data-shake={props.shake} data-held={held}>
       {props.scene === undefined ? null : <Scene3D scene={{ ...props.scene, nudge }} game={game} />}
       {/* Keyed by size: a new size gets new tiles instead of sliding them out of the old board. */}
@@ -316,9 +318,30 @@ function statusOf(surface: ReturnType<typeof useSceneSurface>): SceneStatus {
 /** How long the flat board stays alone before the 3D board's chunk is fetched. */
 const CHUNK_DELAY_MS = 400;
 
+/**
+ * A broken 3D board is tried once more when the page is shown again: phones drop the WebGL
+ * context of a page in the background. Once a session (sceneRetry).
+ */
+function useSceneRetry(failed: boolean, setFailed: (failed: boolean) => void): void {
+  const retried = useRef(false);
+  useEffect(() => {
+    const onShown = () => {
+      const visible = document.visibilityState === 'visible';
+      if (!sceneRetry({ failed, retried: retried.current, visible })) return;
+      retried.current = true;
+      setFailed(false);
+    };
+    document.addEventListener('visibilitychange', onShown);
+    return () => {
+      document.removeEventListener('visibilitychange', onShown);
+    };
+  }, [failed, setFailed]);
+}
+
 /** The 3D board's state: wanted, probed, drawn (ready) or broken (failed). */
 function useSceneState(wanted: boolean) {
   const [failed, setFailed] = useState(false);
+  useSceneRetry(failed, setFailed);
   const [ready, setReady] = useState(false);
   const surface = useSceneSurface(wanted && !failed);
   // A new surface (or none) has drawn nothing yet: the DOM board keeps its looks until it has.
@@ -495,7 +518,6 @@ function actionsOf(props: ScreenProps, puzzle: Puzzle, sound: Sound, menu: MenuS
 
 type Actions = ReturnType<typeof actionsOf>;
 
-/** The wiggle of a tile that could not move, and its knock. */
 /** How long a wiggle lasts (styles.ts), with a little to spare: then it is over. */
 const NUDGE_MS = 320;
 

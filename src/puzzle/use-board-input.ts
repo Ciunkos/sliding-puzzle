@@ -173,9 +173,11 @@ function useHeld({ ref, onDrag }: HeldOptions) {
       clearOffset(ref.current, lastHeld.current);
     lastHeld.current = held;
   }, [held]);
-  // Gone with the board (a new size, a game loading): let the 3D board go of the block too.
+  // Gone with the board (a new size, a game loading): let the 3D board go of the block too, and
+  // write no more offsets.
   useEffect(
     () => () => {
+      writer.stop();
       told.current(undefined);
     },
     [],
@@ -239,6 +241,13 @@ function useGestureState(live: RefObject<Board>, options: HeldOptions, onCommit:
     const open = gesture.current;
     if (open !== undefined && !expects(open, live.current)) end();
   }, [live.current.join()]);
+  // A board unmounted during a press leaves no listeners on the window.
+  useEffect(
+    () => () => {
+      unwatch.current();
+    },
+    [],
+  );
   return { gesture, pointer, held, show, end, begin };
 }
 
@@ -394,11 +403,6 @@ function slider(
   };
 }
 
-/**
- * Handlers for the board element. Keys, drags and swipes slide a tile; a tap slides the tapped tile.
- * `tabStop` is the tile with tabindex 0 (roving tabindex): the board is one tab stop, and it
- * follows the tile that moved or got focus last.
- */
 /** What the board tells its owner: moves, blocked taps, and a drag taken, let go and moving. */
 export interface BoardHandlers {
   onMove: (tile: number) => void;
@@ -408,6 +412,11 @@ export interface BoardHandlers {
 
 const NOTHING = () => undefined;
 
+/**
+ * Handlers for the board element. Keys, drags and swipes slide a tile; a tap slides the tapped tile.
+ * `tabStop` is the tile with tabindex 0 (roving tabindex): the board is one tab stop, and it
+ * follows the tile that moved or got focus last.
+ */
 export function useBoardInput(
   board: Board,
   finished: boolean,

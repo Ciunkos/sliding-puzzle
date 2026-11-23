@@ -2,7 +2,7 @@
 // Browsers without service workers (an insecure origin, some private windows) simply get no offline
 // support: a failed registration is not an error worth a console message.
 import { useEffect, useState } from 'react';
-import { type UpdateState, updateStep } from './update.ts';
+import { type UpdateState, updateCheckDue, updateStep } from './update.ts';
 
 /** The registration scope: the app's base without a trailing slash, so /sliding-puzzle is in it. */
 const SCOPE = '/sliding-puzzle';
@@ -57,6 +57,31 @@ function useRegistration(url: string | undefined, update: (change: Change) => vo
 }
 
 /**
+ * Asks the server for a new worker when the page is shown again (at most once an hour; registering
+ * already asked at load) and when the connection comes back, so an installed app resumed after days
+ * does not stay on an old version.
+ */
+function useUpdateChecks(registration: ServiceWorkerRegistration | undefined): void {
+  useEffect(() => {
+    if (registration === undefined) return;
+    let lastCheck = Date.now();
+    const check = () => {
+      lastCheck = Date.now();
+      registration.update().catch(() => undefined);
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible' && updateCheckDue(lastCheck, Date.now())) check();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('online', check);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('online', check);
+    };
+  }, [registration]);
+}
+
+/**
  * `url` is the worker script, or undefined to register nothing (development). Returns whether to
  * offer the new version, and the action of its Reload button.
  */
@@ -74,6 +99,7 @@ export function useServiceWorker(url: string | undefined): { offer: boolean; rel
     }));
   };
   const registration = useRegistration(url, update);
+  useUpdateChecks(registration);
   const step = updateStep(state);
 
   useEffect(() => {

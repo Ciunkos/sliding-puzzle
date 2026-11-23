@@ -34,13 +34,6 @@ export interface Board3DProps {
    * `serial`) wiggles it again; undefined or the same object does nothing.
    */
   nudge?: { tile: number; serial: number } | undefined;
-  /**
-   * The tile the player is pulling and how far, 0 (in its cell) to 1 (over the gap): the cube sits
-   * exactly there. Undefined when nothing is pulled: a cube let go springs back from where it is.
-   * A committed move changes `board` in the same render as this becomes undefined: the slide then
-   * starts from the dragged place. Ignored under reduced motion.
-   */
-  drag?: { tile: number; progress: number } | undefined;
   /** The first frame is drawn: the DOM board may hand its looks over. */
   onReady: () => void;
   /** The WebGL context was lost: back to the flat board. */
@@ -332,22 +325,6 @@ function useNudge(current: Live | undefined, nudge: Board3DProps['nudge']): void
   }, [current, tile, serial]);
 }
 
-/** Puts the pulled cube where the finger has it; lets the last one go when the pull ends. */
-function useDrag(current: Live | undefined, drag: Board3DProps['drag']): void {
-  const tile = drag?.tile;
-  const progress = drag?.progress;
-  const held = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    if (current === undefined) return;
-    const before = held.current;
-    if (before !== undefined && before !== tile)
-      current.runtime.drag(before, undefined, performance.now());
-    held.current = tile;
-    if (tile !== undefined) current.runtime.drag(tile, progress, performance.now());
-    current.invalidate();
-  }, [current, tile, progress]);
-}
-
 /** The direct line from the pointer handler (use-scene-drag.ts) moves the cube with no render. */
 function useScenePull(current: Live | undefined): void {
   useEffect(() => {
@@ -410,7 +387,6 @@ export function useThreeBoard(props: Board3DProps): RefObject<HTMLDivElement | n
   const live = useRuntime(ref, props);
   useStateFeed(live, props);
   useNudge(live, props.nudge);
-  useDrag(live, props.drag);
   useScenePull(live);
   useTilt(live, props.tilt);
   return ref;

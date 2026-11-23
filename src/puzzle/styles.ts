@@ -276,7 +276,7 @@ export const css = `
   cursor: pointer;
   touch-action: none;
   /* The 3D board's spring (scene-model.ts); plain ease-out where linear() is not supported. */
-  transition: transform 140ms ease-out;
+  transition: transform ${String(SLIDE_MS)}ms ease-out;
   transition: transform ${String(SLIDE_MS)}ms ${SLIDE_EASING};
 }
 .sp-tile[aria-disabled='true'] { cursor: default; }

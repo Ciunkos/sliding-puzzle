@@ -9,7 +9,6 @@ const API_BASE = 'http://localhost:8788/sliding-puzzle/api';
 export const board = (page: Page) => page.getByTestId('board');
 export const moves = (page: Page) => page.getByTestId('moves');
 export const tile = (page: Page, number: number) => page.getByTestId(`tile-${String(number)}`);
-export const enabledTiles = (page: Page) => page.locator('button[data-testid^="tile-"]:enabled');
 export const solvedBanner = (page: Page) => page.getByTestId('solved-banner');
 export const profileNotice = (page: Page) => page.getByTestId('profile-notice');
 export const invalidProfile = (page: Page) => page.getByTestId('invalid-profile');

@@ -67,7 +67,7 @@ describe('Line', () => {
     assert.equal(
       html,
       `<div class="sp-line">
-<p class="sp-howto">Tap a tile next to the gap, swipe, or use the arrow keys.</p>
+<p class="sp-howto">Tap or drag a tile next to the gap, or use the arrow keys.</p>
 </div>`,
     );
   });
@@ -88,7 +88,7 @@ describe('Line', () => {
   test('after the first move how to play fades out, keeping its place', () => {
     const html = markup(<Line message={undefined} notice={undefined} finished={false} moved />);
 
-    assert.match(html, /<p class="sp-howto sp-faded">Tap a tile next to the gap/);
+    assert.match(html, /<p class="sp-howto sp-faded">Tap or drag a tile next to the gap/);
   });
 
   test('an error that is not the notice is an alert', () => {

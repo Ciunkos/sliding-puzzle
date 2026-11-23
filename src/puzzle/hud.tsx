@@ -1,5 +1,6 @@
-// The game's heads-up display around the board: the menu button and the moves in the top corners,
-// the line under the board, the two actions in the bottom corners, and the win card over the board.
+// The game's heads-up display around the board: the menu button in the top-left corner, the moves
+// and play time at the top centre, the line under the board, the two actions in the bottom corners,
+// and the win card, which takes the line's place once solved and never covers the board.
 // Presentational: every text and handler comes from the screen (client.tsx). Nothing here takes
 // room that something appearing later would need, so nothing ever moves (styles.ts).
 import { type ReactElement, type ReactNode, type Ref, useId } from 'react';
@@ -96,7 +97,7 @@ export function Line(props: {
       )}
       {props.message === undefined && !props.finished ? (
         <p className={props.moved ? 'sp-howto sp-faded' : 'sp-howto'}>
-          Tap a tile next to the gap, swipe, or use the arrow keys.
+          Tap or drag a tile next to the gap, or use the arrow keys.
         </p>
       ) : null}
     </div>
@@ -152,7 +153,10 @@ export function Actions(props: {
   );
 }
 
-/** The win: a card that springs in over the board, which stays visible in its solved colours. */
+/**
+ * The win: a card that springs in where the line under the board was (between the actions on a wide
+ * screen), never over the board, which stays visible in its solved colours.
+ */
 export function WinCard(props: {
   banner: string;
   result: string;

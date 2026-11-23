@@ -14,6 +14,37 @@ Play it: <https://ciunkos.com/sliding-puzzle>
 More: [numbers](docs/numbers-light.jpg), [light theme](docs/desktop-light.jpg),
 [phone, dark](docs/phone-dark.jpg).
 
+## Playing
+
+- **Moving.** Tap or drag a tile next to the gap. A dragged tile follows your finger and moves
+  once it has travelled about a third of a cell; a quick flick is enough. Drag a tile further along
+  the gap's row or column and the whole line between it and the gap is pushed at once. Swipes, the
+  arrow keys and WASD work too.
+- **The menu** (top left): the profile (switch to another nickname, a new random one, copy the
+  link), the board size (3×3, 4×4, 5×5), the board's look (numbers, pictures, your own photo,
+  numbers on pictures, the 3D board, tilt on phones), sound effects and music, your best results
+  on this size, and usage statistics.
+- **Sound.** The speaker in the top-right corner mutes everything; the menu switches sound effects
+  and music on their own.
+- **Offline.** After the first visit the game opens and plays without a network. Moves made offline
+  are saved when you are back.
+- **Installing.** The browser can install it as an app (Add to Home Screen on a phone). When a new
+  version has been deployed, the app says "A new version is ready" and switches only when you press
+  Reload.
+- **Your photo** stays on your device. It is never uploaded.
+- **`?fps`** at the end of the address shows frames per second, frame times and the 3D board's
+  quality level in a corner, for the whole visit.
+
+### Usage statistics
+
+On `ciunkos.com` only, the game counts visits, installs, new games and solved games (board size,
+moves, time), skin changes and sound switched on or off, through PostHog. It never sends your
+nickname, board or photo: every web address leaves the page without its profile path. Events go
+through a proxy on the same site, and the SDK is a pinned copy checked by its integrity hash. No
+cookies, no autocapture, no session recording, no error reports. Nothing is counted when you switch
+"Usage statistics" off in the menu, when the browser sends Do Not Track or Global Privacy Control,
+or when automation drives the browser.
+
 ### Identity without authentication
 
 - A profile lives at `/sliding-puzzle/p/<nickname>`. Opening that URL plays as that profile and
@@ -43,14 +74,18 @@ npm run dev     # API on :8787, web on :5173
 
 ## Commands
 
-| Command                  | What it does                                                                     |
-| ------------------------ | -------------------------------------------------------------------------------- |
-| `npm run check`          | Format, lint, types, unit and property tests, gate tests, computed checks, build |
-| `npm run test:e2e`       | Playwright against the real servers, on a phone and a desktop project            |
-| `npm run test:e2e:nogpu` | The same, with WebGL drawn in software, as on the GPU-less CI runners            |
-| `npm run mutate`         | Mutation testing: changes the code and checks that a test notices                |
-| `npm run dev`            | API and web together; Ctrl-C stops both                                          |
-| `npm run format`         | Prettier                                                                         |
+| Command                  | What it does                                                                                                           |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `npm run check`          | Format, lint, types, unit and property tests, gate tests, computed checks, build                                       |
+| `npm run test:e2e`       | Playwright against the real servers, in four projects: phone, desktop, app (the built app), worker (Worker + local D1) |
+| `npm run test:e2e:nogpu` | The same, with WebGL drawn in software, as on the GPU-less CI runners                                                  |
+| `npm run mutate`         | Mutation testing: changes the code and checks that a test notices                                                      |
+| `npm run verify`         | Builds the app, plays the critical flow on a phone viewport, a screenshot per step in `verify-out/`                    |
+| `npm run lighthouse`     | Builds the app and runs Lighthouse five times (mobile); fails when a median misses its threshold                       |
+| `npm run dev`            | API and web together; Ctrl-C stops both                                                                                |
+| `npm run format`         | Prettier                                                                                                               |
+
+The Worker commands (`worker:dev`, `worker:check`, `deploy`) are in [DEPLOY.md](DEPLOY.md).
 
 Scoped tests: `node --import ./scripts/tsx-hooks.js --test src/puzzle`.
 

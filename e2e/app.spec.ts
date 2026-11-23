@@ -138,7 +138,7 @@ test('the api is always asked over the network, never from a cache', async ({ pa
 test('a first visit on a slow phone moves nothing on screen while the game and the 3D board arrive', async ({
   page,
 }) => {
-  // Lighthouse fails above 0.1; the page measured 0.10 when the footer was pushed off the screen.
+  // Lighthouse fails above 0.1; the screen is one fixed grid (styles.ts), so almost nothing shifts.
   expect(await firstVisitLayoutShift(page)).toBeLessThanOrEqual(0.02);
 });
 

@@ -155,11 +155,6 @@ export function contrastRatio(a: Rgb, b: Rgb): number {
   return ((light ?? 0) + 0.05) / ((dark ?? 0) + 0.05);
 }
 
-/** A colour as CSS for a 2D canvas. */
-export function rgbCss(colour: Rgb, alpha = 1): string {
-  return `rgb(${colour.join(' ')} / ${String(alpha)})`;
-}
-
 /** The woods and colours of one theme: the cubes, the tray, the numbers and the felt. */
 export interface WoodTheme {
   tile: Species;

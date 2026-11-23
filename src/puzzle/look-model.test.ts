@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { pictureDescription, sceneNote, sceneSkin, tiltMode } from './look-model.ts';
+import { pictureDescription, sceneNote, sceneRetry, sceneSkin, tiltMode } from './look-model.ts';
 
 describe('sceneNote', () => {
   test('nothing is said while the 3D board is shown, still loading, or switched off', () => {
@@ -26,6 +26,23 @@ describe('sceneNote', () => {
         'The 3D board is off to save data.',
         'The 3D board could not start, so the flat board is shown.',
       ],
+    );
+  });
+});
+
+describe('sceneRetry', () => {
+  test('a 3D board that broke is tried again when the page is shown again', () => {
+    assert.equal(sceneRetry({ failed: true, retried: false, visible: true }), true);
+  });
+
+  test('it is tried again once a session, only when shown, and only after it broke', () => {
+    assert.deepEqual(
+      [
+        sceneRetry({ failed: true, retried: true, visible: true }),
+        sceneRetry({ failed: true, retried: false, visible: false }),
+        sceneRetry({ failed: false, retried: false, visible: true }),
+      ],
+      [false, false, false],
     );
   });
 });

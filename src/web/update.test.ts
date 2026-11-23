@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { updateStep } from './update.ts';
+import { updateCheckDue, updateStep } from './update.ts';
 
 /** A returning player: the page was controlled by a service worker when it loaded. */
 const RETURNING = {
@@ -44,5 +44,18 @@ describe('updateStep', () => {
     const state = { hadController: true, waiting: true, controllerChanged: true, requested: true };
 
     assert.equal(updateStep(state), 'reload');
+  });
+});
+
+/** An hour, in milliseconds. */
+const HOUR = 3_600_000;
+
+describe('updateCheckDue', () => {
+  test('a page shown again within the hour does not check again', () => {
+    assert.equal(updateCheckDue(1000, 1000 + HOUR - 1), false);
+  });
+
+  test('a page shown an hour after its last check checks again', () => {
+    assert.equal(updateCheckDue(1000, 1000 + HOUR), true);
   });
 });

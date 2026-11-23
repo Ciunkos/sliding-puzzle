@@ -200,9 +200,8 @@ export async function scheduled(page: Page, wanted: readonly number[]): Promise<
 }
 
 /**
- * Counts, per component name, how often each rendered in a commit, and the commits that rendered
- * more than the play clock: React flags every fiber it rendered (PerformedWork), and the hook
- * walks the committed tree. Names are those of the dev
+ * Counts, per component name, how often each rendered in a commit: React flags every fiber it
+ * rendered (PerformedWork), and the hook walks the committed tree. Names are those of the dev
  * build the e2e projects run. Call before the page loads; read with `renderedBy`, reset with
  * `resetRendered`.
  */
@@ -223,18 +222,15 @@ export async function countComponentRenders(page: Page): Promise<void> {
     // a flagged fiber that was not in the previous commit rendered in this one.
     let previous = new WeakSet<Fiber>();
     let seen = new WeakSet<Fiber>();
-    /** Counts the components rendered under `fiber`; returns how many were not the clock. */
-    const walk = (fiber: Fiber | null): number => {
-      let beyondClock = 0;
+    /** Counts the components rendered under `fiber`. */
+    const walk = (fiber: Fiber | null): void => {
       for (let node = fiber; node !== null; node = node.sibling) {
         seen.add(node);
         const rendered = (node.flags & 1) === 1 && !previous.has(node);
         const name = rendered ? nameOf(node.type) : undefined;
         if (name !== undefined && name !== '') counts[name] = (counts[name] ?? 0) + 1;
-        if (name !== undefined && name !== '' && name !== 'PlayClock') beyondClock += 1;
-        beyondClock += walk(node.child);
+        walk(node.child);
       }
-      return beyondClock;
     };
     Reflect.set(window, '__REACT_DEVTOOLS_GLOBAL_HOOK__', {
       supportsFiber: true,
@@ -245,9 +241,7 @@ export async function countComponentRenders(page: Page): Promise<void> {
       onCommitFiberUnmount: () => undefined,
       onPostCommitFiberRoot: () => undefined,
       onCommitFiberRoot: (_id: number, root: { current: Fiber }) => {
-        counts['(commits)'] = (counts['(commits)'] ?? 0) + 1;
-        if (walk(root.current.child) > 0)
-          counts['(commits beyond the clock)'] = (counts['(commits beyond the clock)'] ?? 0) + 1;
+        walk(root.current.child);
         previous = seen;
         seen = new WeakSet<Fiber>();
       },

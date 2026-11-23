@@ -29,3 +29,11 @@ export function updateStep(state: UpdateState): UpdateStep {
   if (!state.requested) return 'offer';
   return state.controllerChanged ? 'reload' : 'activate';
 }
+
+/** At most one check for a new version an hour, when the page is shown again. */
+const CHECK_EVERY_MS = 3_600_000;
+
+/** Whether a page shown at `now`, which last asked for a new version at `lastCheck`, asks again. */
+export function updateCheckDue(lastCheck: number, now: number): boolean {
+  return now - lastCheck >= CHECK_EVERY_MS;
+}

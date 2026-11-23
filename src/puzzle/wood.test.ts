@@ -10,7 +10,6 @@ import {
   LIGHT_WOOD,
   noiseAt,
   normalColour,
-  rgbCss,
   ringProfile,
   roughnessAt,
   smoothstep,
@@ -265,14 +264,5 @@ describe('contrastRatio', () => {
     assert.ok(contrastRatio(DARK_WOOD.ink, DARK_WOOD.tile.early) >= 4.5);
     assert.ok(contrastRatio(DARK_WOOD.ink, DARK_WOOD.tile.late) >= 4.5);
     assert.ok(contrastRatio(DARK_WOOD.inkWon, DARK_WOOD.tile.early) >= 4.5);
-  });
-});
-
-describe('rgbCss', () => {
-  test('a colour becomes CSS for a canvas, opaque unless told otherwise', () => {
-    assert.deepEqual(
-      [rgbCss([1, 2, 3]), rgbCss([1, 2, 3], 0.5)],
-      ['rgb(1 2 3 / 1)', 'rgb(1 2 3 / 0.5)'],
-    );
   });
 });

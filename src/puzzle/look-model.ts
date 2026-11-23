@@ -24,6 +24,18 @@ export function sceneNote(
   return NOTES[status];
 }
 
+/**
+ * Whether a 3D board that broke (a lost WebGL context: phones drop them in the background) is
+ * tried again as the page is shown: once a session, so a board that keeps breaking stays flat.
+ */
+export function sceneRetry(state: {
+  failed: boolean;
+  retried: boolean;
+  visible: boolean;
+}): boolean {
+  return state.failed && !state.retried && state.visible;
+}
+
 export type TiltMode = 'pointer' | 'orientation' | 'off';
 
 /** The board follows the mouse, or the phone once tilt is enabled; never with reduced motion. */
