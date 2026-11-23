@@ -336,7 +336,8 @@ export class SessionDriver<State, Move, Options> {
 
   private async afterTheWire(request: () => Promise<SavedGame<State>>) {
     await this.flushing;
-    const round = this.sync?.inFlight && startRound(this.api.definition, this.sync, 0);
+    const elapsed = this.elapsedMs(this.env.now());
+    const round = this.sync?.inFlight && startRound(this.api.definition, this.sync, elapsed);
     if (round) this.settleOutcome(await sendBatch(this.api, this.nickname, round.request));
     return request();
   }

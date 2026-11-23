@@ -125,6 +125,20 @@ async function twoTabs(target: number) {
   return { device, first, second };
 }
 
+/**
+ * Ada's game to 2, 5 min on the server: 1 tapped at 1 s, then the finishing 1 at 4 s, whose batch
+ * never arrives (the network fails it). Nothing retried yet.
+ */
+async function finishedButNeverArrived() {
+  const { device, driver } = await loaded(2);
+  device.world.serverNow = new Date('2026-01-01T00:05:00.000Z');
+  await playAt(device, driver, [1000, ONE]);
+  device.world.refused = '/moves';
+  await playAt(device, driver, [4000, ONE]);
+  device.world.refused = undefined;
+  return { device, driver };
+}
+
 describe('the session driver', () => {
   test('loading resumes the game from the server and shows it, no longer busy', async () => {
     const { driver } = await loaded(5);
@@ -711,6 +725,20 @@ describe('the session driver', () => {
     await driver.reset();
 
     assert.partialDeepStrictEqual(await device.stored(), { moves: 0, version: 3 });
+  });
+
+  test('a finishing batch that never arrived, sent again before a new game, keeps its play time', async () => {
+    // Given a game finished after 3 s of play, whose finishing batch never arrived
+    const { device, driver } = await finishedButNeverArrived();
+    device.world.deviceNow = 60_000;
+
+    // When a new game is started before the retry
+    await driver.start();
+
+    // Then the finished game was saved with its 3 s of play
+    assert.partialDeepStrictEqual(await device.api.results('Ada'), [
+      { variant: 'to 2', moves: 2, reportedMs: 3000 },
+    ]);
   });
 
   test('a tap during a reset is not sent: the reset replaces it', async () => {
