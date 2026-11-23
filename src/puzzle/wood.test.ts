@@ -10,6 +10,7 @@ import {
   LIGHT_WOOD,
   noiseAt,
   normalColour,
+  rimWindow,
   ringProfile,
   roughnessAt,
   smoothstep,
@@ -239,6 +240,46 @@ describe('windowTransform', () => {
       offset: { x: 0.55, y: 0.8500000000000001 },
       repeat: { x: -0.5, y: -0.5 },
     });
+  });
+});
+
+/** Both ends of a texture window, along and across. */
+const ends = (strip: ReturnType<typeof rimWindow>) => [
+  strip.offset.x,
+  strip.offset.x + strip.repeat.x,
+  strip.offset.y,
+  strip.offset.y + strip.repeat.y,
+];
+const RAIL_WIDTH = fc.double({ min: 0.01, max: 0.5, noNaN: true });
+const RAIL = fc.integer({ min: 0, max: 3 });
+
+describe('rimWindow', () => {
+  test('the first rail shows the plank once along its grain, a strip of its width across', () => {
+    assert.deepEqual(rimWindow(0.07, 0), { offset: { x: 0, y: 0.04 }, repeat: { x: 1, y: 0.07 } });
+  });
+
+  test('the second rail is the plank mirrored along its grain, from a strip further across', () => {
+    assert.deepEqual(rimWindow(0.07, 1), { offset: { x: 1, y: 0.09 }, repeat: { x: -1, y: 0.07 } });
+  });
+
+  test('no rail of a frame up to half a plank wide starts before the texture', () => {
+    fc.assert(
+      fc.property(
+        RAIL_WIDTH,
+        RAIL,
+        (width, plank) => Math.min(...ends(rimWindow(width, plank))) >= 0,
+      ),
+    );
+  });
+
+  test('no rail of a frame up to half a plank wide runs past the texture: it never wraps', () => {
+    fc.assert(
+      fc.property(
+        RAIL_WIDTH,
+        RAIL,
+        (width, plank) => Math.max(...ends(rimWindow(width, plank))) <= 1,
+      ),
+    );
   });
 });
 

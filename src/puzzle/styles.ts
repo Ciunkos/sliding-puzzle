@@ -422,8 +422,10 @@ export const css = `
   from { transform: translateY(24px) scale(0.6); }
   to { transform: none; }
 }
-/* Buttons: pills that squash when pressed and spring back. */
-.sp-button {
+/* Buttons: pills that squash when pressed and spring back. The buttons the app puts in the menu
+   (shellMenu: the usage statistics switch) are drawn the same. */
+.sp-button,
+.sp-menu .sp-menu-shell button {
   box-sizing: border-box;
   min-width: 44px;
   min-height: 44px;
@@ -438,8 +440,11 @@ export const css = `
   cursor: pointer;
   box-shadow: 0 2px 0 rgb(40 20 5 / 0.25), 0 4px 12px rgb(40 20 5 / 0.12);
   transition: transform 320ms ${SPRING};
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
-.sp-button:active { transform: scale(0.9, 0.84); transition-duration: 70ms; }
+.sp-button:active,
+.sp-menu .sp-menu-shell button:active { transform: scale(0.9, 0.84); transition-duration: 70ms; }
 .sp-primary {
   border-color: var(--sp-primary);
   background: var(--sp-primary);
@@ -454,7 +459,8 @@ export const css = `
   padding: 0;
 }
 .sp-icon-button svg { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }
-.sp-button[aria-pressed='true'] {
+.sp-button[aria-pressed='true'],
+.sp-menu .sp-menu-shell button[aria-pressed='true'] {
   background: var(--sp-pressed);
   color: var(--sp-pressed-text);
   font-weight: 700;
@@ -464,7 +470,9 @@ export const css = `
 .sp-unavailable[aria-disabled='true'] { border-style: dashed; color: var(--sp-muted); cursor: not-allowed; box-shadow: none; }
 .sp-button:focus-visible,
 .sp-tile:focus-visible { outline: none; }
-.sp-button:focus-visible {
+.sp-button:focus-visible,
+.sp-menu .sp-menu-shell button:focus-visible {
+  outline: none;
   box-shadow: 0 0 0 2px var(--sp-ring-inner), 0 0 0 5px var(--sp-ring-outer);
 }
 .sp-hint { margin: 6px 0 0; color: var(--sp-muted); font-size: 14px; }

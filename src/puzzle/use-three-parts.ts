@@ -23,6 +23,7 @@ import { CONFETTI_COLOURS } from './confetti.ts';
 import type { Size } from './rules.ts';
 import { RIM_UNITS } from './scene-model.ts';
 import type { PlankTextures } from './use-tile-faces.ts';
+import { rimWindow } from './wood.ts';
 
 /** A rounded rectangle path from (x, y), `w` x `h`, corner radius `r`. */
 function roundedRect(shape: Shape, x: number, y: number, w: number, h: number, r: number): Shape {
@@ -129,16 +130,17 @@ function woodMaterial(wood: PlankTextures, roughness: number): MeshStandardMater
   });
 }
 
-/** One plank of the frame, `length` long along x: its grain runs along it, cut from `at`. */
+/** One plank of the frame, `length` long along x: its grain runs along it (rimWindow, rail `at`). */
 function rimPlank(
   look: TrayLook,
   size: { length: number; width: number; height: number },
   at: number,
 ): Mesh {
+  const strip = rimWindow(size.width, at);
   const view = (texture: Texture) => {
     const copy = texture.clone();
-    copy.repeat.set(size.length, size.width);
-    copy.offset.set(at * 0.37, 0.04 + at * 0.05);
+    copy.repeat.set(strip.repeat.x, strip.repeat.y);
+    copy.offset.set(strip.offset.x, strip.offset.y);
     return copy;
   };
   const material = new MeshStandardMaterial({

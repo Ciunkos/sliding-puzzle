@@ -233,3 +233,20 @@ export function windowTransform(
     repeat: { x: win.flip ? -scale : scale, y: win.upend ? -scale : scale },
   };
 }
+
+/**
+ * How rail `plank` (0-3) of the frame, `width` plank widths across, shows the plank texture: the
+ * whole of it once along the grain (the generated plank does not tile, so a wrap would show as a
+ * step in the rail), mirrored on every other rail, and a strip of its width further across for
+ * each rail so no two look alike.
+ */
+export function rimWindow(
+  width: number,
+  plank: number,
+): { offset: { x: number; y: number }; repeat: { x: number; y: number } } {
+  const mirrored = plank % 2 === 1;
+  return {
+    offset: { x: mirrored ? 1 : 0, y: (4 + 5 * plank) / 100 },
+    repeat: { x: mirrored ? -1 : 1, y: width },
+  };
+}
