@@ -20,6 +20,9 @@ const SOFTWARE_GL =
 
 export default defineConfig({
   testDir: 'e2e',
+  // The tests are long flows of many steps (README, Tests), not one check each; on a runner
+  // without a GPU a flow takes a few times longer than here, so each gets two minutes.
+  timeout: 120_000,
   fullyParallel: false,
   workers: 1,
   reporter: [['list']],
