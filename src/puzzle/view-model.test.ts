@@ -143,6 +143,17 @@ describe('announcement', () => {
     assert.equal(announcement(SIX_LEFT, savedGame(solved, 34, true)), 'Solved in 34 moves!');
   });
 
+  test('a game loaded already solved, or a solved board shown again, announces no win', () => {
+    const solved = grid`
+      1 2 3
+      4 5 6
+      7 8 _
+    `;
+
+    assert.equal(announcement(undefined, savedGame(solved, 34, true)), '');
+    assert.equal(announcement(solved, savedGame(solved, 34, true)), '');
+  });
+
   test('the first game, an unchanged board, a new game or a reset announce nothing', () => {
     assert.equal(announcement(undefined, savedGame(SIX_LEFT, 0, false)), '');
     assert.equal(announcement(SIX_LEFT, savedGame(SIX_LEFT, 4, false)), '');

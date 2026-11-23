@@ -128,10 +128,14 @@ function movedTile(before: Board, after: Board): number | undefined {
 
 /**
  * What the live region says when the game on screen changes from `before` (undefined on the first
- * game) to `game`: the win, one move, or nothing (a load, a new game, a reset).
+ * game) to `game`: the win, one move, or nothing (a load, a new game, a reset). The win only when
+ * the board just changed into it: a game loaded already solved is no news.
  */
 export function announcement(before: Board | undefined, game: SavedGame<PuzzleState>): string {
-  if (game.finished) return solvedText(game);
+  if (game.finished) {
+    const changed = before !== undefined && before.join() !== game.state.board.join();
+    return changed ? solvedText(game) : '';
+  }
   const tile = before === undefined ? undefined : movedTile(before, game.state.board);
   if (tile === undefined) return '';
   return `Moved tile ${String(tile)}. ${countMoves(game.moves)}.`;

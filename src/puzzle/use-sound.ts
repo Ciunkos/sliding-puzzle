@@ -423,7 +423,11 @@ function useAudioLifetime(live: Live): void {
 function useGameSounds(live: Live, game: GameSnapshot | undefined): void {
   const previous = useRef<GameSnapshot | undefined>(undefined);
   useEffect(() => {
-    if (game === undefined) return;
+    // No game (another profile loading): the next one is a load, which makes no sound.
+    if (game === undefined) {
+      previous.current = undefined;
+      return;
+    }
     const cues = gameSounds(previous.current, game);
     previous.current = game;
     for (const cue of cues) playOn(live, cue.effect, cue.variation, cue.count);

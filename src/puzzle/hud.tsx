@@ -81,7 +81,8 @@ function MessageLine(props: { message: string; notice: string | undefined }): Re
  * The line under the board, its height always kept: the engine's message (the error, or else the
  * notice), or how to play while a game is open. `game-error` names the message whatever it holds
  * (e2e reads it); `game-notice` marks a notice. A finished game has the win card instead; after
- * the first move how to play fades out.
+ * the first move how to play fades out. Its keys clause is hidden where the only pointer is a
+ * finger (styles.ts): a phone has no arrow keys.
  */
 export function Line(props: {
   message: string | undefined;
@@ -97,7 +98,8 @@ export function Line(props: {
       )}
       {props.message === undefined && !props.finished ? (
         <p className={props.moved ? 'sp-howto sp-faded' : 'sp-howto'}>
-          Tap or drag a tile next to the gap, or use the arrow keys.
+          Tap or drag a tile next to the gap
+          <span className="sp-howto-keys">, or use the arrow keys</span>.
         </p>
       ) : null}
     </div>

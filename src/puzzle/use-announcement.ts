@@ -10,7 +10,11 @@ export function useAnnouncement(game: SavedGame<PuzzleState> | undefined): strin
   const previous = useRef<Board | undefined>(undefined);
   const [text, setText] = useState('');
   useEffect(() => {
-    if (game === undefined) return;
+    // No game (another profile loading): what comes next is a load, not a move from the last board.
+    if (game === undefined) {
+      previous.current = undefined;
+      return;
+    }
     const next = announcement(previous.current, game);
     previous.current = game.state.board;
     if (next !== '') setText(next);

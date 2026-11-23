@@ -219,6 +219,8 @@ export const css = `
 .sp-line p { margin: 0; }
 .sp-howto, .sp-notice { color: var(--sp-muted); }
 .sp-howto { transition: opacity 600ms ease, visibility 0s linear 0s; }
+/* A screen touched with a finger and nothing else has no arrow keys to mention. */
+@media (hover: none) and (pointer: coarse) { .sp-howto-keys { display: none; } }
 /* After the first move: gone, its place kept. */
 .sp-howto.sp-faded { opacity: 0; visibility: hidden; transition: opacity 600ms ease, visibility 0s linear 600ms; }
 .sp-error { color: var(--sp-error); font-weight: 600; }

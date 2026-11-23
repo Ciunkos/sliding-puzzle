@@ -59,7 +59,7 @@ describe('Status', () => {
 });
 
 describe('Line', () => {
-  test('an open game without a message says how to play', () => {
+  test('an open game without a message says how to play, the keys in a part a touch screen hides', () => {
     const html = markup(
       <Line message={undefined} notice={undefined} finished={false} moved={false} />,
     );
@@ -67,7 +67,7 @@ describe('Line', () => {
     assert.equal(
       html,
       `<div class="sp-line">
-<p class="sp-howto">Tap or drag a tile next to the gap, or use the arrow keys.</p>
+<p class="sp-howto">Tap or drag a tile next to the gap<span class="sp-howto-keys">, or use the arrow keys</span>.</p>
 </div>`,
     );
   });
