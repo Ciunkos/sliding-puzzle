@@ -27,40 +27,44 @@ export function analyticsAllowed(here: Surroundings): boolean {
 
 const isAppPath = (path: string) => path === APP_PATH || path.startsWith(`${APP_PATH}/`);
 
+/** A profile path anywhere inside longer text, up to the next space or quote. */
+const PROFILE_PATH_IN_TEXT = /\/sliding-puzzle\/p\/[^\s"'<>]*/g;
+
 /**
  * A web address without anything that names a player: an address of this app becomes its origin
- * and the app path, one of another site its origin, and an app path alone the app path. Any other
- * value is left as it is.
+ * and the app path, one of another site its origin, and an app path alone the app path. In any
+ * other text, a profile path becomes the app path; the rest of the text stays.
  */
 export function scrubUrl(value: string): string {
   if (isAppPath(value)) return APP_PATH;
-  if (!URL.canParse(value)) return value;
-  const url = new URL(value);
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') return value;
-  return isAppPath(url.pathname) ? `${url.origin}${APP_PATH}` : url.origin;
+  const url = URL.canParse(value) ? new URL(value) : undefined;
+  if (url?.protocol === 'https:' || url?.protocol === 'http:')
+    return isAppPath(url.pathname) ? `${url.origin}${APP_PATH}` : url.origin;
+  return value.replaceAll(PROFILE_PATH_IN_TEXT, APP_PATH);
 }
 
 /**
- * A plain object only. The SDK's event also holds a Date (its timestamp); treating that as a record
- * would rebuild it as `{}`, and PostHog refuses an event without a readable time.
+ * A plain object only (also one without a prototype). The SDK's event also holds a Date (its
+ * timestamp); treating that as a record would rebuild it as `{}`, and PostHog refuses an event
+ * without a readable time.
  */
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && Object.getPrototypeOf(value) === Object.prototype;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
 
-/** Every string scrubbed, one level of nested objects too ($set, $set_once). */
-function scrubValues(record: Record<string, unknown>, depth: number): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(record).map(([key, value]) => {
-      if (typeof value === 'string') return [key, scrubUrl(value)];
-      if (isRecord(value) && depth > 0) return [key, scrubValues(value, depth - 1)];
-      return [key, value];
-    }),
-  );
+/** `value` with every string in it scrubbed, through plain objects and arrays at any depth. */
+function scrubValue(value: unknown): unknown {
+  if (typeof value === 'string') return scrubUrl(value);
+  if (Array.isArray(value)) return value.map(scrubValue);
+  if (!isRecord(value)) return value;
+  return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, scrubValue(inner)]));
 }
 
 /** An event as the analytics SDK is about to send it, with every web address scrubbed. */
 export function scrubEvent(event: unknown): unknown {
-  return isRecord(event) ? scrubValues(event, 2) : event;
+  return isRecord(event) ? scrubValue(event) : event;
 }
 
 /** This app's name on every event: the analytics project is shared with other sites. */

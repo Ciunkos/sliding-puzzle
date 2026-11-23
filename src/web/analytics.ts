@@ -40,13 +40,17 @@ export function optedOut(): boolean {
   }
 }
 
-/** Remembers the player's choice. */
+/** The window event when the player switches usage statistics on: main.tsx starts them then. */
+export const USAGE_SWITCHED_ON = 'usage-statistics-on';
+
+/** Remembers the player's choice; switching on tells the page (USAGE_SWITCHED_ON). */
 export function setOptedOut(off: boolean): void {
   try {
     writeOptedOut(browserStorage(), off);
   } catch {
     // No storage at all: optedOut() already answers true.
   }
+  if (!off) window.dispatchEvent(new Event(USAGE_SWITCHED_ON));
 }
 
 function allowedHere(): boolean {
@@ -76,6 +80,8 @@ function sdkConfig(base: string): Record<string, unknown> {
     capture_pageview: false,
     capture_pageleave: false,
     autocapture: false,
+    // Error reports could carry a profile address in a message or a stack; none are sent.
+    capture_exceptions: false,
     disable_session_recording: true,
     disable_surveys: true,
     disable_external_dependency_loading: true,

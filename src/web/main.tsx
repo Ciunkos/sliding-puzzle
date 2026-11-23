@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { type Analytics, ANALYTICS_OFF, startAnalytics } from './analytics.ts';
+import { type Analytics, ANALYTICS_OFF, startAnalytics, USAGE_SWITCHED_ON } from './analytics.ts';
 import { App } from './app.tsx';
 import { forwardFeatureEvents } from './feature-events.ts';
 
@@ -35,11 +35,20 @@ if (root) {
 }
 
 // Usage statistics (ciunkos.com only, and only when the player allows it). Nothing waits for them,
-// and a failure only means nothing is counted. The page's own moments are sent from here.
-void startAnalytics(BASE).then((started) => {
+// and a failure only means nothing is counted. The page's own moments are sent from here. A page
+// that loaded with them off starts them when the player switches them on in the menu.
+/** Started, or starting: switching on again changes nothing (each event checks the switch). */
+let begun = false;
+async function beginAnalytics(): Promise<void> {
+  if (begun) return;
+  begun = true;
+  const started = await startAnalytics(BASE);
+  begun = started !== ANALYTICS_OFF;
   analytics = started;
   started.track({ name: 'page_view', properties: {} });
-  window.addEventListener('appinstalled', () => {
-    started.track({ name: 'app_installed', properties: {} });
-  });
+}
+window.addEventListener('appinstalled', () => {
+  analytics.track({ name: 'app_installed', properties: {} });
 });
+window.addEventListener(USAGE_SWITCHED_ON, () => void beginAnalytics());
+void beginAnalytics();

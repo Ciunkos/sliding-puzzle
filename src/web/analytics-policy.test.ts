@@ -29,6 +29,27 @@ function profilePageView(nickname: string) {
   };
 }
 
+/**
+ * An event naming `nickname` somewhere: its profile address as a whole value or inside longer
+ * text, in objects and arrays nested to any depth.
+ */
+function eventNaming(nickname: string) {
+  const address = fc.oneof(
+    fc.constant(`https://ciunkos.com/sliding-puzzle/p/${nickname}`),
+    fc.constant(`/sliding-puzzle/p/${nickname}`),
+    fc.stringMatching(new RegExp(`^.{0,12}/sliding-puzzle/p/${nickname}.{0,12}$`)),
+  );
+  const { value } = fc.letrec((tie) => ({
+    value: fc.oneof(
+      { depthSize: 'small' },
+      address,
+      fc.array(tie('value')),
+      fc.dictionary(fc.string(), tie('value')),
+    ),
+  }));
+  return fc.record({ event: fc.constant('page_view'), properties: value, more: address });
+}
+
 describe('analyticsAllowed', () => {
   test('a player on ciunkos.com who allowed everything is counted', () => {
     assert.equal(analyticsAllowed(ON_THE_SITE), true);
@@ -100,6 +121,24 @@ describe('scrubEvent', () => {
         NICKNAME,
         (nickname) => !JSON.stringify(scrubEvent(profilePageView(nickname))).includes(nickname),
       ),
+    );
+  });
+
+  test('no nickname survives anywhere in an event: nested, in arrays, or inside longer text', () => {
+    fc.assert(
+      fc.property(
+        NICKNAME.chain((nickname) => fc.tuple(fc.constant(nickname), eventNaming(nickname))),
+        ([nickname, event]) => !JSON.stringify(scrubEvent(event)).includes(nickname),
+      ),
+    );
+  });
+
+  test('a profile path inside longer text becomes the app path, and the text around it stays', () => {
+    assert.deepEqual(
+      scrubEvent({ properties: { list: [{ $message: 'at /sliding-puzzle/p/Ada now' }] } }),
+      {
+        properties: { list: [{ $message: 'at /sliding-puzzle now' }] },
+      },
     );
   });
 

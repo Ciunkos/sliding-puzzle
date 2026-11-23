@@ -38,7 +38,7 @@ export function UsageToggle(): ReactElement {
         Counts visits, installs, new games and solved games (board size, moves, time), skin changes
         and sound switched on or off, never your nickname, board or photo.
       </p>
-      <button type="button" data-testid="usage-toggle" onClick={toggle}>
+      <button type="button" data-testid="usage-toggle" aria-pressed={!off} onClick={toggle}>
         {usageLabel(off)}
       </button>
     </section>
