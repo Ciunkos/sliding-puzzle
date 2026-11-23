@@ -21,12 +21,12 @@ import {
 } from 'three';
 import { celebrationSeed, type ConfettiPiece, confettiAt, createConfetti } from './confetti.ts';
 import {
-  aheadShare,
   createDust,
   DUST_MS,
   type DustMote,
   dustAt,
   dustOpacity,
+  edgeFade,
   IMPACT_MS,
   LANDING_KICK,
   nudgeDirection,
@@ -34,14 +34,16 @@ import {
   shakeAt,
   squashAt,
   WIGGLE_MS,
-  wallFade,
   wiggleAt,
   WIN_KICK,
 } from './effects.ts';
 import {
-  detectCap,
+  type Cap,
+  firstFrameShift,
   type FrameReadout,
+  frameLead,
   frameStats,
+  holdCap,
   nextQuality,
   type Quality,
   recent,
@@ -53,6 +55,7 @@ import type { Board, Size } from './rules.ts';
 import {
   approach,
   CANVAS_UNITS,
+  DRAW_UNITS,
   cameraDistance,
   CELEBRATION_MS,
   celebrationLift,
@@ -67,6 +70,7 @@ import {
   slideAt,
   type Tilt,
   type Vec2,
+  widerFov,
 } from './scene-model.ts';
 import {
   CONFETTI_HEX,
@@ -127,9 +131,6 @@ const DUST_COUNT = 24;
 /** The puff in board widths is scaled up this much: it billows out of the gap and over the cubes. */
 const DUST_BILLOW = 4;
 /** The farthest a puff drifts ahead of its edge: the fastest mote's 0.14 x 0.16 s, billowed. */
-const DUST_REACH = 0.14 * 0.16 * DUST_BILLOW;
-/** How far inside the wall a puff blocked by it starts: where its motes are full size (wallFade). */
-const DUST_WALL_GAP = 0.06;
 const DEG = Math.PI / 180;
 /** Seeds of the planks: fixed, so a board always shows the same wood. */
 const TILE_SEED = 1907;
@@ -207,6 +208,8 @@ interface State {
   drag: Pull | undefined;
   /** Tiles springing back from a drag: no landing squash. */
   quiet: Set<number>;
+  /** When the last input that started motion came, until its first frame is drawn. */
+  inputAt: number | undefined;
   frames: FrameClock;
 }
 
@@ -236,8 +239,12 @@ interface FrameClock {
   /** Cubes moved in the last frame: the shadow map must be redrawn once more after they stop. */
   wasMoving: boolean;
   shadowsStale: boolean;
+  /** The dragged cube was pulled since the last frame. */
+  pulled: boolean;
   statsAt: number;
   renderer: string | undefined;
+  /** The cap the readout shows. */
+  cap: Cap | undefined;
 }
 
 interface Parts {
@@ -313,7 +320,8 @@ function buildParts(options: RuntimeOptions, look: Look, assets: Assets): Parts 
   const scene = new Scene();
   // Its world matrices are updated once a frame by followShadow, before the render.
   scene.matrixWorldAutoUpdate = false;
-  const camera = new PerspectiveCamera(FOV, 1, 0.05, 20);
+  // The camera stands where it frames the canvas's box, and sees wider: the spill around it.
+  const camera = new PerspectiveCamera(widerFov(FOV, CANVAS_UNITS, DRAW_UNITS), 1, 0.05, 20);
   const rest = cameraDistance(CANVAS_UNITS, 1, FOV);
   camera.position.z = rest;
   // Views of the cached images: this runtime owns (and frees) them, the images stay for the next.
@@ -369,6 +377,7 @@ function newState(size: Size, level: Quality): State {
     skinVersion: 0,
     drag: undefined,
     quiet: new Set(),
+    inputAt: undefined,
     frames: newClock(level),
   };
 }
@@ -376,8 +385,9 @@ function newState(size: Size, level: Quality): State {
 function newClock(level: Quality): FrameClock {
   return {
     ...{ level, applied: undefined, css: 0, dpr: 1, last: undefined, chained: false },
-    ...{ all: [], moving: [], wasMoving: true, shadowsStale: true, statsAt: 0 },
+    ...{ all: [], moving: [], wasMoving: true, shadowsStale: true, pulled: false, statsAt: 0 },
     renderer: undefined,
+    cap: undefined,
   };
 }
 
@@ -539,6 +549,14 @@ function stepConfetti(parts: Parts, state: State, now: number): boolean {
   return true;
 }
 
+/**
+ * Half the width the camera sees at height `z` above the tile tops, in board widths, a little less
+ * for the board's tilt: at the tile tops the drawing's half width, closer to the camera less.
+ */
+function visibleHalf(parts: Parts, z: number): number {
+  return (DRAW_UNITS / 2) * ((parts.rest - z) / parts.rest) * 0.97;
+}
+
 /** The puff where a cube landed: motes drift ahead of its leading edge and rise into the light. */
 function stepDust(parts: Parts, state: State, now: number): boolean {
   const dust = state.dust;
@@ -549,21 +567,19 @@ function stepDust(parts: Parts, state: State, now: number): boolean {
     return false;
   }
   const side = { x: -dust.ahead.y, y: dust.ahead.x };
-  // Against the rim a puff has no room ahead: it starts a little inside and bounces back off the
-  // wall over the cube, and every mote shrinks away as it nears the wall, so nothing is cut by the
-  // rim or the edge of the picture.
-  const room = aheadShare(dust.origin, dust.ahead, DUST_REACH);
-  const drift = room * 2 - 1;
-  const back = (1 - room) * DUST_WALL_GAP;
   dust.motes.forEach((mote, i) => {
     const at = dustAt(mote, t);
     const along = mote.along * dust.width * 1.15 + at.across * DUST_BILLOW;
-    const ahead = at.ahead * DUST_BILLOW * drift - back;
+    const ahead = at.ahead * DUST_BILLOW;
     const x = dust.origin.x + dust.ahead.x * ahead + side.x * along;
     const y = dust.origin.y + dust.ahead.y * ahead + side.y * along;
-    dummy.position.set(x, y, 0.003 + at.z * DUST_BILLOW);
+    const z = 0.003 + at.z * DUST_BILLOW;
+    dummy.position.set(x, y, z);
     dummy.rotation.set(0, 0, 0);
-    dummy.scale.setScalar(at.scale * wallFade({ x, y }));
+    // A puff spills freely over the frame; only near the edge of the drawing (over the page,
+    // outside the box) does a mote shrink away, so the canvas never cuts it.
+    const reach = Math.max(Math.abs(x), Math.abs(y));
+    dummy.scale.setScalar(at.scale * edgeFade(reach, visibleHalf(parts, z)));
     dummy.updateMatrix();
     parts.dust.setMatrixAt(i, dummy.matrix);
   });
@@ -793,6 +809,7 @@ function setBoard(parts: Parts, state: State, options: RuntimeOptions, update: B
   // Without motion a move puts the cube in place at once, and a win drops the corner in: the
   // shadow map must follow even though nothing slides.
   state.frames.shadowsStale = true;
+  state.inputAt = now;
   const wasOpen = state.board !== undefined && !state.finished;
   const motion = !options.reducedMotion;
   moveAndLand(parts, state, motion, update);
@@ -817,7 +834,7 @@ function drag(
   const { tile, progress } = pull;
   // No motion, or a tile that is not on this board (the gap, a stale number): nothing to pull.
   if (options.reducedMotion || !state.rest.has(tile)) return;
-  state.frames.shadowsStale = true;
+  state.frames.pulled = true;
   if (progress !== undefined) {
     grab(state, tile, progress, now);
     return;
@@ -830,6 +847,7 @@ function drag(
   // Let go before the move: back to its cell from where it is, without a landing.
   state.slides.set(tile, { from, to: rest, start: now });
   state.quiet.add(tile);
+  state.inputAt = now;
 }
 
 /**
@@ -912,12 +930,14 @@ function rendererName(gl: WebGLRenderingContext | WebGL2RenderingContext): strin
 function readout(parts: Parts, state: State): FrameReadout {
   const clock = state.frames;
   const last = recent(clock.all, 1000);
+  // Held while frames stay near it, so a steady 60 does not flicker between a cap and none.
+  clock.cap = holdCap(clock.cap, last);
   const gl = parts.renderer.getContext();
   clock.renderer ??= rendererName(gl);
   return {
     ...frameStats(last),
     ...{ width: gl.drawingBufferWidth, height: gl.drawingBufferHeight },
-    ...{ level: clock.level, cap: detectCap(last), renderer: clock.renderer },
+    ...{ level: clock.level, cap: clock.cap, renderer: clock.renderer },
   };
 }
 
@@ -954,6 +974,7 @@ function nudge(state: State, options: RuntimeOptions, tile: number, now: number)
   if (options.reducedMotion || state.board === undefined) return;
   const way = nudgeDirection(state.board, tile, state.size);
   state.nudges.set(tile, { start: now, way });
+  state.inputAt = now;
 }
 
 /**
@@ -975,23 +996,47 @@ function step(parts: Parts, state: State, options: RuntimeOptions, now: number) 
   const dt = Math.min(50, now - (state.last ?? now));
   const tiles = stepTiles(parts, state, now, options.reducedMotion ? 0 : SLIDE_MS);
   const corner = stepCorner(parts, state, now);
+  const confetti = stepConfetti(parts, state, now);
+  const dust = stepDust(parts, state, now);
+  const camera = stepCamera(parts, state, now);
+  const tilt = stepTilt(parts, state, dt);
   const celebrating = celebrationTime(state, now) < CELEBRATION_MS;
-  const busy = [
-    tiles,
-    corner,
-    stepConfetti(parts, state, now),
-    stepDust(parts, state, now),
-    stepCamera(parts, state, now),
-    stepTilt(parts, state, dt),
-  ].some(Boolean);
-  return { busy, cubes: tiles || corner || celebrating || state.drag !== undefined };
+  const busy = [tiles, corner, confetti, dust, camera, tilt].includes(true);
+  return { busy, cubes: tiles || corner || celebrating || state.frames.pulled };
+}
+
+/**
+ * Moves back everything an input started (at `state.inputAt`) so the first frame after it already
+ * shows a frame of motion: a frame's time is when it began, which may be just after the input or
+ * even before it.
+ */
+function catchUpInput(state: State, now: number): void {
+  const input = state.inputAt;
+  if (input === undefined) return;
+  state.inputAt = undefined;
+  const shift = firstFrameShift(input, now, frameLead(state.frames.all.slice(-10)));
+  if (shift === 0) return;
+  const later = (time: number) => (time >= input ? time + shift : time);
+  for (const slide of state.slides.values()) slide.start = later(slide.start);
+  for (const nudge of state.nudges.values()) nudge.start = later(nudge.start);
+  shiftEffects(state, later);
+}
+
+/** The landing's puff and kick, and the win, move with the input that started them. */
+function shiftEffects(state: State, later: (time: number) => number): void {
+  if (state.dust !== undefined) state.dust.start = later(state.dust.start);
+  if (state.kick !== undefined) state.kick.start = later(state.kick.start);
+  if (state.celebration !== undefined) state.celebration = later(state.celebration);
+  if (state.corner !== undefined) state.corner = later(state.corner);
 }
 
 function frame(parts: Parts, state: State, options: RuntimeOptions, now: number): boolean {
   const clock = state.frames;
   const interval = clock.chained && clock.last !== undefined ? now - clock.last : undefined;
   applyQuality(parts, state);
+  catchUpInput(state, now);
   const { busy, cubes } = step(parts, state, options, now);
+  clock.pulled = false;
   // The shadow map is redrawn only when a cube moved (and once more after it stopped); a tilt
   // only moves its matrices (followShadow).
   followShadow(parts);

@@ -198,6 +198,27 @@ export const RIM_UNITS = BOARD_BORDER_SHARE / (1 - 2 * BOARD_BORDER_SHARE);
 /** The canvas's width in world units. */
 export const CANVAS_UNITS = (1 + 2 * SCENE_MARGIN_SHARE) / (1 - 2 * BOARD_BORDER_SHARE);
 
+/**
+ * How far past its canvas box (the board and SCENE_MARGIN_SHARE) the 3D board draws on each side,
+ * in world units: room for a landing puff to spill over the frame and fade over the page. The
+ * canvas element is that much larger than its box (use-three-board.ts) and the camera frames the
+ * larger drawing, so the board still lands exactly under the DOM buttons.
+ */
+const DRAW_SPILL = 0.1;
+/** The drawing's width in world units. */
+export const DRAW_UNITS = CANVAS_UNITS + 2 * DRAW_SPILL;
+/** How far the canvas element reaches past its box on each side, as a share of the box's width. */
+export const DRAW_INSET_SHARE = DRAW_SPILL / CANVAS_UNITS;
+
+/**
+ * The field of view (degrees) that sees `to` wide from where a `fovDeg` view sees `from` wide: the
+ * camera stays put, so the perspective, and the board under the buttons, stay exactly as they were.
+ */
+export function widerFov(fovDeg: number, from: number, to: number): number {
+  const half = Math.tan((fovDeg * Math.PI) / 360) * (to / from);
+  return (Math.atan(half) * 360) / Math.PI;
+}
+
 const GLOW_MS = 900;
 const GLOW_PEAK = 0.35;
 

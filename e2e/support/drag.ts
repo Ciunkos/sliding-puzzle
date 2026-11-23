@@ -26,9 +26,15 @@ export async function pressTile(page: Page, number: number): Promise<At & { cell
   return centre;
 }
 
-/** Moves the pressed mouse to `from` + (dx, dy) in small steps, slowly (no flick). */
+/**
+ * Moves the pressed mouse to `from` + (dx, dy) in 12 small steps, slowly (no flick): about a frame
+ * apart, so a busy page (software 3D) cannot fold them into a burst that reads as a quick flick.
+ */
 export async function dragTo(page: Page, from: At, dx: number, dy: number): Promise<void> {
-  await page.mouse.move(from.x + dx, from.y + dy, { steps: 12 });
+  for (let step = 1; step <= 12; step += 1) {
+    await page.mouse.move(from.x + (dx * step) / 12, from.y + (dy * step) / 12);
+    await page.waitForTimeout(16);
+  }
 }
 
 /**
@@ -130,4 +136,31 @@ export async function pull(page: Page, number: number, cells: number): Promise<v
   const from = await pressTile(page, number);
   await dragTo(page, from, from.cell * cells, 0);
   await page.mouse.up();
+}
+
+/**
+ * Counts React commits (renders that reached the page) from the start: React reports each one to
+ * the DevTools global hook, which this stands in for. Call before the page loads.
+ */
+export async function countRenders(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    Reflect.set(window, 'reactCommits', 0);
+    Reflect.set(window, '__REACT_DEVTOOLS_GLOBAL_HOOK__', {
+      supportsFiber: true,
+      renderers: new Map(),
+      inject: () => 1,
+      checkDCE: () => undefined,
+      onScheduleFiberRoot: () => undefined,
+      onCommitFiberUnmount: () => undefined,
+      onPostCommitFiberRoot: () => undefined,
+      onCommitFiberRoot: () => {
+        Reflect.set(window, 'reactCommits', Number(Reflect.get(window, 'reactCommits')) + 1);
+      },
+    });
+  });
+}
+
+/** The number of React commits so far (see countRenders). */
+export function renders(page: Page): Promise<number> {
+  return page.evaluate(() => Number(Reflect.get(window, 'reactCommits')));
 }

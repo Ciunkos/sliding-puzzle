@@ -9,10 +9,12 @@ import {
   type FocusEvent,
   type RefObject,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
 import {
+  dragShift,
   expects,
   type Gesture,
   isTap,
@@ -29,6 +31,7 @@ import {
 } from './input.ts';
 import { type Board, sizeOf } from './rules.ts';
 import { useMedia } from './use-media.ts';
+import { pullScene } from './use-scene-drag.ts';
 
 export interface BoardInput {
   ref: RefObject<HTMLDivElement | null>;
@@ -41,8 +44,8 @@ export interface BoardInput {
   onPointerUp: (event: PointerEvent) => void;
   onPointerCancel: (event: PointerEvent) => void;
   onLostPointerCapture: (event: PointerEvent) => void;
-  /** The held tile while a drag is on, for the board (and the 3D board) to draw. */
-  drag: DragView | undefined;
+  /** The tile held by a drag, if any: its offset is written straight on its button. */
+  held: number | undefined;
   onClick: (event: MouseEvent) => void;
 }
 
@@ -102,24 +105,101 @@ function watchWindow(pointerId: number, end: () => void): () => void {
 /** A commit: the tile, and the board the gesture moved it on (the board on screen may lag). */
 type Commit = (tile: number, on: Board) => unknown;
 
-/** The held tile, shown on the board and told to `onDrag` in the same update as any move. */
-function useHeld(onDrag: (drag: DragView | undefined) => void) {
-  const [drag, setDrag] = useState<DragView | undefined>(undefined);
-  const latest = useRef(onDrag);
-  latest.current = onDrag;
+/** The button of `tile` on the board. */
+function tileButton(board: HTMLDivElement | null, tile: number): HTMLElement | null {
+  return board?.querySelector<HTMLElement>(`[data-tile="${String(tile)}"]`) ?? null;
+}
+
+/** Draws the held tile where the drag has it: its offset, straight on its button's style. */
+function writeOffset(board: HTMLDivElement | null, on: Board, drag: DragView): void {
+  const shift = dragShift(on, drag);
+  const button = tileButton(board, drag.tile);
+  if (shift === undefined || button === null) return;
+  button.style.setProperty('--sp-drag-x', `${String(shift.col * 100)}%`);
+  button.style.setProperty('--sp-drag-y', `${String(shift.row * 100)}%`);
+}
+
+function clearOffset(board: HTMLDivElement | null, tile: number): void {
+  const button = tileButton(board, tile);
+  button?.style.removeProperty('--sp-drag-x');
+  button?.style.removeProperty('--sp-drag-y');
+}
+
+/**
+ * The drag's offset on the held tile's button, outside React, at most once an animation frame,
+ * whatever the number of pointer moves.
+ */
+function useFrameWriter(ref: RefObject<HTMLDivElement | null>) {
+  const latest = useRef<{ drag: DragView; on: Board } | undefined>(undefined);
+  const frame = useRef(0);
+  const flush = () => {
+    frame.current = 0;
+    const next = latest.current;
+    if (next !== undefined) writeOffset(ref.current, next.on, next.drag);
+  };
+  return {
+    write: (drag: DragView, on: Board) => {
+      latest.current = { drag, on };
+      if (frame.current === 0) frame.current = requestAnimationFrame(flush);
+    },
+    stop: () => {
+      cancelAnimationFrame(frame.current);
+      frame.current = 0;
+      latest.current = undefined;
+    },
+  };
+}
+
+interface HeldOptions {
+  ref: RefObject<HTMLDivElement | null>;
+  onDrag: (drag: DragView | undefined) => void;
+}
+
+/**
+ * The held tile. React hears only when a tile is taken and let go (its class, data-held, and
+ * `onDrag`, in the same update as any move); the offset between goes straight to the page: the
+ * button's style once a frame, and the 3D board's cube through pullScene, with every move.
+ */
+function useHeld({ ref, onDrag }: HeldOptions) {
+  const [held, setHeld] = useState<number | undefined>(undefined);
+  const current = useRef<number | undefined>(undefined);
+  const lastHeld = useRef<number | undefined>(undefined);
+  const told = useRef(onDrag);
+  told.current = onDrag;
+  const writer = useFrameWriter(ref);
+  // Its offset goes in the same frame as its class (so it springs back or on, not jumps).
+  useLayoutEffect(() => {
+    if (held === undefined && lastHeld.current !== undefined)
+      clearOffset(ref.current, lastHeld.current);
+    lastHeld.current = held;
+  }, [held]);
   // Gone with the board (a new size, a game loading): let the 3D board go of the block too.
   useEffect(
     () => () => {
-      latest.current(undefined);
+      told.current(undefined);
     },
     [],
   );
-  // The 3D board lets go of its block in the very update that moves it, never a frame apart.
-  const report = (next: DragView | undefined) => {
-    setDrag(next);
-    latest.current(next);
+  const take = (drag: DragView, on: Board) => {
+    if (current.current !== drag.tile) {
+      current.current = drag.tile;
+      setHeld(drag.tile);
+      told.current(drag);
+    }
+    writer.write(drag, on);
+    pullScene(drag.tile, drag.progress);
   };
-  return { drag, report };
+  /** Lets go; `moved`: it was committed (the move takes the cube on), else it springs back. */
+  const release = (moved: boolean) => {
+    const tile = current.current;
+    if (tile === undefined) return;
+    current.current = undefined;
+    writer.stop();
+    if (!moved) pullScene(tile, undefined);
+    setHeld(undefined);
+    told.current(undefined);
+  };
+  return { held, take, release };
 }
 
 /**
@@ -128,21 +208,18 @@ function useHeld(onDrag: (drag: DragView | undefined) => void) {
  * mouse button is found up, or when the board on screen is not one it expects (a reset, another
  * tab, a new game).
  */
-function useGestureState(
-  live: RefObject<Board>,
-  onDrag: (drag: DragView | undefined) => void,
-  onCommit: Commit,
-) {
+function useGestureState(live: RefObject<Board>, options: HeldOptions, onCommit: Commit) {
   const gesture = useRef<Gesture | undefined>(undefined);
   const pointer = useRef<number | undefined>(undefined);
   const unwatch = useRef<() => void>(() => undefined);
-  const { drag, report } = useHeld(onDrag);
+  const { held, take, release } = useHeld(options);
   // With reduced motion the tile does not follow the finger; it still commits at the threshold.
   const still = useMedia('(prefers-reduced-motion: reduce)');
   const show = (step: Step, on: Board) => {
     // Held once it has moved: a press alone keeps the tile's slide (one mid-slide finishes it).
-    const held = step.kind === 'hold' && step.progress > 0 && !still;
-    report(held ? { tile: step.tile, progress: step.progress } : undefined);
+    if (step.kind === 'hold' && step.progress > 0 && !still)
+      take({ tile: step.tile, progress: step.progress }, on);
+    else release(step.kind === 'commit' || step.kind === 'push');
     if (step.kind === 'commit') onCommit(step.tile, on);
     if (step.kind === 'push')
       for (const stage of pushStages(on, step.tiles)) onCommit(stage.tile, stage.on);
@@ -151,7 +228,7 @@ function useGestureState(
     unwatch.current();
     gesture.current = undefined;
     pointer.current = undefined;
-    report(undefined);
+    release(false);
   };
   const begin = (next: Gesture, pointerId: number) => {
     gesture.current = next;
@@ -162,10 +239,33 @@ function useGestureState(
     const open = gesture.current;
     if (open !== undefined && !expects(open, live.current)) end();
   }, [live.current.join()]);
-  return { gesture, pointer, drag, show, end, begin };
+  return { gesture, pointer, held, show, end, begin };
 }
 
 type GestureState = ReturnType<typeof useGestureState>;
+
+/** The positions a pointer event stands for: its coalesced moves where the browser keeps them. */
+function samplesOf(event: PointerEvent): Point[] {
+  const coalesced =
+    event.type === 'pointermove' ? event.nativeEvent.getCoalescedEvents() : undefined;
+  if (coalesced === undefined || coalesced.length === 0) return [pointAt(event)];
+  return coalesced.map((sample) => ({ x: sample.clientX, y: sample.clientY, t: sample.timeStamp }));
+}
+
+/**
+ * Steps the gesture through `points`; the last step, and the board it was decided on, are what
+ * the page shows. A commit ends the run: one move per press.
+ */
+function stepAll(gesture: Gesture, points: Point[], cellPx: number) {
+  let current = { gesture, step: { kind: 'idle' } as Step, on: gesture.board };
+  for (const point of points) {
+    const on = current.gesture.board;
+    const next = stepGesture(current.gesture, point, cellPx);
+    current = { ...next, on };
+    if (next.step.kind === 'commit' || next.step.kind === 'push') break;
+  }
+  return current;
+}
 
 /** One pointer event of the open press, stepped; undefined when it is not (or no longer) open. */
 function stepPress(
@@ -180,13 +280,13 @@ function stepPress(
     state.end();
     return undefined;
   }
-  const next = stepGesture(
+  const next = stepAll(
     current,
-    pointAt(event),
+    samplesOf(event),
     cellWidth(ref.current, sizeOf(current.board) ?? 1),
   );
   state.gesture.current = next.gesture;
-  state.show(next.step, current.board);
+  state.show(next.step, next.on);
   if (next.gesture.travelled) capture(ref.current, event.pointerId);
   return next.gesture;
 }
@@ -230,19 +330,19 @@ function useSwallow() {
  * push several tiles. Only the main mouse button presses; a second finger is ignored.
  */
 function useDrag(
-  ref: RefObject<HTMLDivElement | null>,
   live: RefObject<Board>,
   finished: boolean,
-  onDrag: (drag: DragView | undefined) => void,
+  options: HeldOptions,
   onCommit: Commit,
 ) {
-  const state = useGestureState(live, onDrag, onCommit);
+  const { ref } = options;
+  const state = useGestureState(live, options, onCommit);
   const swallow = useSwallow();
   const endIfOurs = (event: PointerEvent) => {
     if (event.pointerId === state.pointer.current) state.end();
   };
   return {
-    drag: state.drag,
+    held: state.held,
     swallow,
     onPointerDown: (event: PointerEvent) => {
       if (!event.isPrimary || otherButton(event) || state.pointer.current !== undefined) return;
@@ -299,19 +399,27 @@ function slider(
  * `tabStop` is the tile with tabindex 0 (roving tabindex): the board is one tab stop, and it
  * follows the tile that moved or got focus last.
  */
+/** What the board tells its owner: moves, blocked taps, and a drag taken, let go and moving. */
+export interface BoardHandlers {
+  onMove: (tile: number) => void;
+  onBlocked?: (tile: number | undefined) => void;
+  onDrag?: (drag: DragView | undefined) => void;
+}
+
+const NOTHING = () => undefined;
+
 export function useBoardInput(
   board: Board,
   finished: boolean,
-  onMove: (tile: number) => void,
-  onBlocked: (tile: number | undefined) => void = () => undefined,
-  onDrag: (drag: DragView | undefined) => void = () => undefined,
+  handlers: BoardHandlers,
 ): BoardInput {
+  const { onMove, onBlocked = NOTHING, onDrag = NOTHING } = handlers;
   const ref = useRef<HTMLDivElement>(null);
   const live = useRef(board);
   live.current = board;
   const [preferred, setPreferred] = useState<number | undefined>(undefined);
   const slide = slider(board, finished, onMove, onBlocked, setPreferred);
-  const { swallow, ...pointer } = useDrag(ref, live, finished, onDrag, (tile, on) =>
+  const { swallow, ...pointer } = useDrag(live, finished, { ref, onDrag }, (tile, on) =>
     slide(tile, undefined, false, on),
   );
   return {

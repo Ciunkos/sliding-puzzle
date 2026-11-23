@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { SavedGame } from '../game/index.ts';
 import { grid } from '../test-support/grid.ts';
 import type { PuzzleState } from './index.ts';
-import { type BoardLook, BoardView, nudgeOf, Tiles } from './board-view.tsx';
+import { type BoardLook, BoardView, nudgeOf, sameBoardProps, Tiles } from './board-view.tsx';
 
 /** A 3x3 board with the blank in the middle: tiles 2, 4, 6 and 8 can slide into it. */
 const BLANK_IN_THE_MIDDLE = grid`
@@ -221,23 +221,55 @@ describe('nudgeOf', () => {
 });
 
 describe('Tiles', () => {
-  test('the held tile is drawn where the drag has it, and only that tile', () => {
-    // Tile 4 is left of the gap and slides right: half a cell on, it is drawn 50% further right.
+  test('the held tile is marked held and drawn from its cell by its drag offset, only that tile', () => {
     const html = renderToStaticMarkup(
       <Tiles
         game={savedGame(BLANK_IN_THE_MIDDLE, false)}
         look={NUMBERS_LOOK}
         tabStop={4}
         nudge={undefined}
-        drag={{ tile: 4, progress: 0.5 }}
+        held={4}
       />,
     );
 
-    // Held: its own class, and drawn half a cell further right; no other tile is held.
+    // Held: its own class, and drawn its drag offset (written later) from its cell; no other.
     assert.match(
       html,
-      /class="sp-tile sp-held" data-testid="tile-4"[^>]*--sp-drag-x:50%;--sp-drag-y:0%/,
+      /class="sp-tile sp-held" data-testid="tile-4"[^>]*transform:translate\(calc\(0% \+ var\(--sp-drag-x, 0%\)\)/,
     );
     assert.equal(html.split('sp-held').length, 2);
+  });
+});
+
+describe('sameBoardProps', () => {
+  const NONE = () => undefined;
+  const props = (change: Record<string, unknown>) => ({
+    game: savedGame(BLANK_IN_THE_MIDDLE, false),
+    onMove: NONE,
+    look: PICTURE,
+    nudge: { tile: 4, serial: 1 },
+    ...change,
+  });
+
+  test('the same board drawn the same way needs no new render, whatever else changed in the game', () => {
+    const synced = { ...savedGame(BLANK_IN_THE_MIDDLE, false), version: 3 };
+
+    assert.equal(sameBoardProps(props({}), props({ game: synced, look: { ...PICTURE } })), true);
+  });
+
+  test('another board, a finished game, another look or a new nudge is drawn again', () => {
+    assert.deepEqual(
+      [
+        sameBoardProps(props({}), props({ game: savedGame(TWENTY_FOUR_RIGHT, false) })),
+        sameBoardProps(props({}), props({ game: savedGame(BLANK_IN_THE_MIDDLE, true) })),
+        sameBoardProps(props({}), props({ look: { ...PICTURE, layered: true } })),
+        sameBoardProps(props({}), props({ nudge: { tile: 4, serial: 2 } })),
+      ],
+      [false, false, false, false],
+    );
+  });
+
+  test("a new handler is a new render: it is the owner's to keep handlers the same", () => {
+    assert.equal(sameBoardProps(props({}), props({ onMove: () => undefined })), false);
   });
 });

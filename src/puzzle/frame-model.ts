@@ -39,15 +39,50 @@ const ON_CAP = 0.15;
 /** This share of the frames on the cap makes it a cap. */
 const STEADY = 0.9;
 
-function onCap(intervals: readonly number[], cap: Cap): boolean {
+/** The share of `intervals` within ON_CAP of `cap`'s period. */
+function share(intervals: readonly number[], cap: Cap): number {
   const period = 1000 / cap;
   const near = intervals.filter((ms) => Math.abs(ms - period) <= period * ON_CAP).length;
-  return intervals.length > 0 && near >= intervals.length * STEADY;
+  return intervals.length === 0 ? 0 : near / intervals.length;
+}
+
+function onCap(intervals: readonly number[], cap: Cap): boolean {
+  return share(intervals, cap) >= STEADY;
 }
 
 /** The rate frames are held at, when they sit steadily on 120, 60 or 30 per second. */
 export function detectCap(intervals: readonly number[]): Cap | undefined {
   return CAPS.find((cap) => onCap(intervals, cap));
+}
+
+/** A cap once seen holds while at least this share of the frames still sits on it. */
+const STILL_ON_CAP = 0.75;
+
+/**
+ * The cap for the readout, steady: once frames are seen on a cap it holds while three in four
+ * still sit on it, so the readout does not flicker between a cap and none at a steady rate.
+ */
+export function holdCap(previous: Cap | undefined, intervals: readonly number[]): Cap | undefined {
+  if (previous !== undefined && share(intervals, previous) >= STILL_ON_CAP) return previous;
+  return detectCap(intervals);
+}
+
+/**
+ * How far ahead of the input a frame is, in ms: the median of recent frame intervals, between a
+ * 144 Hz and a 30 Hz frame; a 60 Hz frame when none are known.
+ */
+export function frameLead(intervals: readonly number[]): number {
+  if (intervals.length === 0) return 1000 / 60;
+  return Math.min(1000 / 30, Math.max(1000 / 144, percentile(intervals, 0.5)));
+}
+
+/**
+ * How far to move back the start of motion begun by an input at `input` so the first frame drawn
+ * after it, at `now`, already shows a frame of it (`lead`): a frame stamped at or soon after the
+ * input (or before it: a frame's time is when it began) would otherwise show nothing moved.
+ */
+export function firstFrameShift(input: number, now: number, lead: number): number {
+  return Math.min(0, now - lead - input);
 }
 
 /** Fewer frames than this say nothing about the frame rate. */

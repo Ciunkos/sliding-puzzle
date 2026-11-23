@@ -8,6 +8,7 @@ import {
   type ReactElement,
   type ReactNode,
   Suspense,
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -143,6 +144,34 @@ interface BoardHandlers {
   onBlocked: (tile: number | undefined) => void;
 }
 
+/**
+ * The tile held by a drag, as the stage needs it (data-held): set when it is taken and let go, and
+ * with a commit, never per move. The 3D board's cube follows the finger by itself (pullScene).
+ */
+function useStageHeld() {
+  const [held, setHeld] = useState<number | undefined>(undefined);
+  const onDrag = useCallback((next: DragView | undefined) => {
+    setHeld(next?.tile);
+  }, []);
+  return { held, onDrag };
+}
+
+/**
+ * The board's handlers, the same functions across renders (the board is drawn again only when
+ * what it draws changes, board-view.tsx), each calling the latest session and nudge.
+ */
+function useBoardHandlers(session: Session, board: BoardHandlers) {
+  const latest = useRef({ session, board });
+  latest.current = { session, board };
+  const onMove = useCallback((tile: number) => {
+    latest.current.session.move({ tile });
+  }, []);
+  const onBlocked = useCallback((tile: number | undefined) => {
+    latest.current.board.onBlocked(tile);
+  }, []);
+  return { onMove, onBlocked };
+}
+
 /** The board, or a square of the same size while the game loads; the 3D board under it. */
 function Stage(props: {
   session: Session;
@@ -152,8 +181,8 @@ function Stage(props: {
   board: BoardHandlers;
 }): ReactElement {
   const { game, message } = props.session;
-  // The held tile while a drag is on: the 3D board draws its block where the finger has it.
-  const [drag, setDrag] = useState<DragView | undefined>(undefined);
+  const { held, onDrag } = useStageHeld();
+  const { onMove, onBlocked } = useBoardHandlers(props.session, props.board);
   if (game === undefined) {
     return (
       <div className="sp-stage">
@@ -163,13 +192,11 @@ function Stage(props: {
       </div>
     );
   }
-  const { nudge, onBlocked } = props.board;
+  const { nudge } = props.board;
   return (
     // data-held: the held tile the 3D board is given (e2e checks it goes with the move).
-    <div className="sp-stage" data-shake={props.shake} data-held={drag?.tile}>
-      {props.scene === undefined ? null : (
-        <Scene3D scene={{ ...props.scene, nudge, drag }} game={game} />
-      )}
+    <div className="sp-stage" data-shake={props.shake} data-held={held}>
+      {props.scene === undefined ? null : <Scene3D scene={{ ...props.scene, nudge }} game={game} />}
       {/* Keyed by size: a new size gets new tiles instead of sliding them out of the old board. */}
       <BoardView
         key={game.state.board.length}
@@ -177,10 +204,8 @@ function Stage(props: {
         look={props.look}
         nudge={nudge}
         onBlocked={onBlocked}
-        onDrag={setDrag}
-        onMove={(tile) => {
-          props.session.move({ tile });
-        }}
+        onDrag={onDrag}
+        onMove={onMove}
       />
     </div>
   );

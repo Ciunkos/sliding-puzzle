@@ -3,10 +3,9 @@
 // browser animates the transform, and focus stays on the tile. Positions live in the data-board order.
 // The buttons are the only way to play. When the 3D board draws the tiles (`layered`), they stay
 // exactly where they are, with a transparent face, so focus rings still show over the 3D tiles.
-import type { ReactElement } from 'react';
+import { memo, type ReactElement } from 'react';
 import type { SavedGame } from '../game/client.tsx';
 import type { PuzzleState } from './definition.ts';
-import { dragShift } from './input.ts';
 import type { Size } from './rules.ts';
 import { boardClass, place } from './styles.ts';
 import { type DragView, useBoardInput } from './use-board-input.ts';
@@ -39,7 +38,7 @@ interface BoardViewProps {
   onBlocked?: (tile: number | undefined) => void;
   /** The tile to wiggle (it could not move); a new serial wiggles it again. */
   nudge?: { tile: number; serial: number } | undefined;
-  /** Hears the held tile while a drag is on (undefined when none), e.g. for the 3D board. */
+  /** Hears a tile taken and let go by a drag (undefined), in the same update as any move. */
   onDrag?: (drag: DragView | undefined) => void;
 }
 
@@ -66,21 +65,22 @@ function TileButton(props: {
   look: BoardLook;
   /** 'a' or 'b' (they take turns, so the wiggle starts again) while it wiggles. */
   nudge?: 'a' | 'b' | undefined;
-  /** Held by a drag: how far from its cell it is drawn, in cells. */
-  shift?: { col: number; row: number } | undefined;
+  /** Held by a drag: drawn where the drag has it (the offset is written on it directly). */
+  held?: boolean;
 }): ReactElement {
-  const { tile, size, shift } = props;
+  const { tile, size } = props;
+  const held = props.held === true;
   return (
     <button
       type="button"
-      className={shift === undefined ? 'sp-tile' : 'sp-tile sp-held'}
+      className={held ? 'sp-tile sp-held' : 'sp-tile'}
       data-testid={`tile-${String(tile.tile)}`}
       data-tile={tile.tile}
       data-nudge={props.nudge}
       aria-label={`Tile ${String(tile.tile)}`}
       aria-disabled={!tile.movable}
       tabIndex={props.tabStop ? 0 : -1}
-      style={place(size, tile, shift)}
+      style={place(size, tile, held)}
     >
       <Face tile={tile.tile} size={size} look={props.look} />
     </button>
@@ -109,16 +109,16 @@ export function nudgeOf(nudge: BoardViewProps['nudge'], tile: number): 'a' | 'b'
   return nudge.serial % 2 === 0 ? 'a' : 'b';
 }
 
-/** Every tile of the board in tile-number order; the held one drawn where the drag has it. */
+/** Every tile of the board in tile-number order; the held one marked (its offset comes later). */
 export function Tiles(props: {
   game: SavedGame<PuzzleState>;
   look: BoardLook;
   tabStop: number;
   nudge: BoardViewProps['nudge'];
-  drag: DragView | undefined;
+  /** The tile held by a drag, if any. */
+  held: number | undefined;
 }): ReactElement {
   const view = layout(props.game);
-  const shift = dragShift(props.game.state.board, props.drag);
   return (
     <>
       {view.tiles.map((tile) => (
@@ -129,14 +129,14 @@ export function Tiles(props: {
           tabStop={tile.tile === props.tabStop}
           look={props.look}
           nudge={nudgeOf(props.nudge, tile.tile)}
-          shift={tile.tile === props.drag?.tile ? shift : undefined}
+          held={tile.tile === props.held}
         />
       ))}
     </>
   );
 }
 
-export function BoardView({
+function BoardViewDraw({
   game,
   onMove,
   look = NUMBERS,
@@ -145,7 +145,11 @@ export function BoardView({
   onDrag,
 }: BoardViewProps): ReactElement {
   const view = layout(game);
-  const input = useBoardInput(game.state.board, game.finished, onMove, onBlocked, onDrag);
+  const input = useBoardInput(game.state.board, game.finished, {
+    onMove,
+    onBlocked,
+    onDrag,
+  });
   return (
     <div
       ref={input.ref}
@@ -166,7 +170,39 @@ export function BoardView({
       onFocus={input.onFocus}
     >
       <Blank size={view.size} finished={game.finished} look={look} at={view.blank} />
-      <Tiles game={game} look={look} tabStop={input.tabStop} nudge={nudge} drag={input.drag} />
+      <Tiles game={game} look={look} tabStop={input.tabStop} nudge={nudge} held={input.held} />
     </div>
   );
 }
+
+/** Everything the board draws from, as one comparable string. */
+function drawn(props: BoardViewProps): string {
+  const look = props.look ?? NUMBERS;
+  const { picture } = look;
+  const { nudge } = props;
+  return JSON.stringify([
+    props.game.state.board,
+    props.game.finished,
+    look.skin,
+    picture?.url,
+    picture?.badges,
+    look.layered,
+    look.describedBy,
+    nudge?.tile,
+    nudge?.serial,
+  ]);
+}
+
+const HANDLERS = ['onMove', 'onBlocked', 'onDrag'] as const;
+
+/**
+ * Whether the board would be drawn the same: the same cells, finished or not, look, nudge and
+ * handlers. A game saved again (a new version, the clock) is not a new board, so the tiles render
+ * once per move, not with every change elsewhere on the screen.
+ */
+export function sameBoardProps(a: BoardViewProps, b: BoardViewProps): boolean {
+  return drawn(a) === drawn(b) && HANDLERS.every((name) => a[name] === b[name]);
+}
+
+/** The board, drawn again only when what it draws changed (sameBoardProps). */
+export const BoardView = memo(BoardViewDraw, sameBoardProps);

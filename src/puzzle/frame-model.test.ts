@@ -4,6 +4,9 @@ import fc from 'fast-check';
 import { repeated } from '../test-support/scripted-rng.ts';
 import {
   detectCap,
+  firstFrameShift,
+  frameLead,
+  holdCap,
   fpsLines,
   fpsWanted,
   frameStats,
@@ -87,6 +90,41 @@ describe('detectCap', () => {
       [detectCap([...repeated([16.7], 9), 30]), detectCap([16.2, 17.1, 16.7, 16.6, 16.9])],
       [60, 60],
     );
+  });
+});
+
+describe('holdCap', () => {
+  test('a cap once seen holds while three frames in four still sit on it', () => {
+    assert.equal(holdCap(60, [...repeated([16.7], 8), 25, 30]), 60);
+  });
+
+  test('without a cap yet, or when frames leave it, the cap is what the frames show', () => {
+    assert.deepEqual(
+      [holdCap(undefined, AT_60), holdCap(60, JANKY), holdCap(60, AT_30)],
+      [60, undefined, 30],
+    );
+  });
+});
+
+describe('frameLead', () => {
+  test('one frame ahead is the usual frame time: 1000/60 ms when nothing is known yet', () => {
+    assert.ok(Math.abs(frameLead([]) - 1000 / 60) < 1e-9);
+  });
+
+  test('the median of recent frames, kept between a 144 Hz and a 30 Hz frame', () => {
+    assert.equal(frameLead([8, 8.5, 9]), 8.5);
+    assert.ok(Math.abs(frameLead([2, 3, 4]) - 1000 / 144) < 1e-9);
+    assert.ok(Math.abs(frameLead([90, 95, 99]) - 1000 / 30) < 1e-9);
+  });
+});
+
+describe('firstFrameShift', () => {
+  test('an input whose first frame comes at once, or even stamped earlier, starts one frame back', () => {
+    assert.deepEqual([firstFrameShift(1000, 1002, 16), firstFrameShift(1000, 996, 16)], [-14, -20]);
+  });
+
+  test('an input whose first frame comes a frame or more later already shows motion: no shift', () => {
+    assert.deepEqual([firstFrameShift(1000, 1016, 16), firstFrameShift(1000, 1040, 16)], [0, 0]);
   });
 });
 

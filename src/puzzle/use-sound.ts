@@ -44,6 +44,8 @@ export interface Mixer {
   effects: GainNode;
   /** The music bus: ducked under effects. */
   music: GainNode;
+  /** The music's room: its impulse response is filled in later (see fillRoom), off the gesture. */
+  room: ConvolverNode;
 }
 
 /** Master gain, the effects bus, and the music bus with its low-pass and room. */
@@ -60,12 +62,41 @@ export function createMixer(context: BaseAudioContext, destination: AudioNode): 
   });
   music.connect(lowpass);
   lowpass.connect(new GainNode(context, { gain: ROOM.dry })).connect(master);
-  const room = new ConvolverNode(context, { buffer: impulseResponse(context) });
+  // Empty until fillRoom: an empty room is silent, and the dry path still plays.
+  const room = new ConvolverNode(context);
   lowpass
     .connect(room)
     .connect(new GainNode(context, { gain: ROOM.wet }))
     .connect(master);
-  return { master, effects, music };
+  return { master, effects, music, room };
+}
+
+/** Frames of the room's impulse response made per idle moment: a few ms, even on a slow phone. */
+const ROOM_SLICE = 8192;
+
+/**
+ * Fills the room's impulse response (about 300 000 samples) a slice per idle moment, never in a
+ * tap and never as one long task, then gives it to the room. The samples are impulseResponse's.
+ */
+export function fillRoom(context: BaseAudioContext, mixer: Mixer): void {
+  const length = Math.round(ROOM.seconds * context.sampleRate);
+  const buffer = context.createBuffer(2, length, context.sampleRate);
+  const noise = roomNoise();
+  let from = 0;
+  const slice = () => {
+    const to = Math.min(length, from + ROOM_SLICE);
+    fillImpulse(buffer, noise, from, to);
+    from = to;
+    if (from < length) whenIdle(slice);
+    else mixer.room.buffer = buffer;
+  };
+  whenIdle(slice);
+}
+
+/** Runs `work` when the page is idle (soon at the latest), not in the frame of the tap. */
+function whenIdle(work: () => void): void {
+  if (typeof requestIdleCallback === 'function') requestIdleCallback(work, { timeout: 2000 });
+  else setTimeout(work, 300);
 }
 
 /** Seeded white noise, the same on every run. */
@@ -78,17 +109,27 @@ export function noiseBuffer(context: BaseAudioContext, seed: number): AudioBuffe
   return buffer;
 }
 
+/** The seeded noise of each ear of the room: decorrelated, the same on every run. */
+function roomNoise(): (() => number)[] {
+  return [createRng(11), createRng(12)];
+}
+
+/** Frames `from` to `to` of the room `buffer`: each ear's noise, fading over the buffer's length. */
+function fillImpulse(buffer: AudioBuffer, noise: (() => number)[], from: number, to: number): void {
+  const { length } = buffer;
+  noise.forEach((random, channel) => {
+    const samples = buffer.getChannelData(channel);
+    for (let index = from; index < to; index += 1) {
+      samples[index] = (random() * 2 - 1) * (1 - index / length) ** ROOM.fade;
+    }
+  });
+}
+
 /** A stereo room: decorrelated noise in each ear, fading to silence over ROOM.seconds. */
 export function impulseResponse(context: BaseAudioContext): AudioBuffer {
   const length = Math.round(ROOM.seconds * context.sampleRate);
   const buffer = context.createBuffer(2, length, context.sampleRate);
-  for (let channel = 0; channel < 2; channel += 1) {
-    const random = createRng(channel + 11);
-    const samples = buffer.getChannelData(channel);
-    for (let index = 0; index < length; index += 1) {
-      samples[index] = (random() * 2 - 1) * (1 - index / length) ** ROOM.fade;
-    }
-  }
+  fillImpulse(buffer, roomNoise(), 0, length);
   return buffer;
 }
 
@@ -245,7 +286,9 @@ function startMusic(engine: Engine): MusicRun {
       position.next += BAR_SECONDS;
     }
   };
-  tick();
+  // The first bars wait for an idle moment, as do the next ones (the timer): never in the tap
+  // that unlocked the audio. A late start only skips to the next bar (catchUp).
+  whenIdle(tick);
   return { output, timer: setInterval(tick, TICK_MS) };
 }
 
@@ -275,14 +318,15 @@ function webAudio(): boolean {
   return typeof AudioContext === 'function';
 }
 
+/**
+ * The context is created in the gesture (browsers unlock audio only there); the music's room, the
+ * one costly buffer, is made when the page is idle, so the first tap's frame stays short.
+ */
 function createEngine(): Engine {
   const context = new AudioContext({ latencyHint: 'interactive' });
-  return {
-    context,
-    mixer: createMixer(context, context.destination),
-    noise: noiseBuffer(context, 5),
-    music: undefined,
-  };
+  const mixer = createMixer(context, context.destination);
+  fillRoom(context, mixer);
+  return { context, mixer, noise: noiseBuffer(context, 5), music: undefined };
 }
 
 /** Wakes a context the browser suspended; a refusal (no gesture yet) is retried on the next. */

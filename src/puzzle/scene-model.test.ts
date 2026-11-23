@@ -8,6 +8,9 @@ import {
   badgeShown,
   cameraDistance,
   CANVAS_UNITS,
+  DRAW_INSET_SHARE,
+  DRAW_UNITS,
+  widerFov,
   cornerAt,
   dragAt,
   glowAt,
@@ -414,6 +417,26 @@ describe('cameraDistance', () => {
 describe('proportions of the scene', () => {
   test('a board 1000 px wide with a 25 px border has a rim of 25/950 and a canvas of 1070/950 grid widths', () => {
     assert.deepEqual([RIM_UNITS, CANVAS_UNITS], [0.026315789473684213, 1.1263157894736844]);
+  });
+});
+
+describe('the drawing area', () => {
+  test('the 3D board draws 0.1 board widths past the canvas on each side: 1070/950 + 0.2 = 1260/950 wide', () => {
+    assert.ok(Math.abs(DRAW_UNITS - 1260 / 950) < 1e-12);
+  });
+
+  test('so the canvas reaches past its box by 0.1 / 1.126 = 95/1070 of the box on each side', () => {
+    assert.ok(Math.abs(DRAW_INSET_SHARE - 95 / 1070) < 1e-12);
+  });
+});
+
+describe('widerFov', () => {
+  test('a view as wide as before keeps its angle', () => {
+    assert.equal(widerFov(90, 1, 1), 90);
+  });
+
+  test('seeing sqrt(3) times as wide from the same place turns 90 degrees into 120: tan 60 = sqrt(3)', () => {
+    assert.ok(Math.abs(widerFov(90, 1, Math.sqrt(3)) - 120) < 1e-9);
   });
 });
 

@@ -14,24 +14,19 @@ import type { Place } from './view-model.ts';
 const cqw = (share: number) => `${String(Math.round(share * 1000) / 10)}cqw`;
 
 /**
- * The size and position of one cell: a tile slides when its transform changes. A held tile
- * (`shift`, in cells, see input.ts dragShift) is drawn that far from its cell, through the
- * --sp-drag-x and --sp-drag-y properties added to its cell's position.
+ * The size and position of one cell: a tile slides when its transform changes. A `held` tile
+ * (a drag) is drawn its --sp-drag-x and --sp-drag-y further, which the pointer handler writes on
+ * it directly (use-board-input.ts), once a frame, without a render.
  */
-export function place(size: Size, at: Place, shift?: { col: number; row: number }): CSSProperties {
+export function place(size: Size, at: Place, held = false): CSSProperties {
   const share = `calc(100% / ${String(size)})`;
   // A percentage in translate() is of the element itself, i.e. one cell per 100%.
   const x = `${String(at.col * 100)}%`;
   const y = `${String(at.row * 100)}%`;
-  if (shift === undefined)
-    return { width: share, height: share, transform: `translate(${x}, ${y})` };
-  return {
-    width: share,
-    height: share,
-    '--sp-drag-x': `${String(shift.col * 100)}%`,
-    '--sp-drag-y': `${String(shift.row * 100)}%`,
-    transform: `translate(calc(${x} + var(--sp-drag-x)), calc(${y} + var(--sp-drag-y)))`,
-  } as CSSProperties;
+  const transform = held
+    ? `translate(calc(${x} + var(--sp-drag-x, 0%)), calc(${y} + var(--sp-drag-y, 0%)))`
+    : `translate(${x}, ${y})`;
+  return { width: share, height: share, transform };
 }
 
 export function boardClass(size: Size, finished: boolean, layered = false): string {

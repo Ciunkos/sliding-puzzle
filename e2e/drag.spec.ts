@@ -2,7 +2,7 @@
 // still down, once it has gone 0.3 of a cell (input.ts COMMIT_SHARE). Each test drags on the known board, where
 // tile 11 above the gap slides down and tile 14 left of it slides right.
 import type { APIRequestContext, Page } from '@playwright/test';
-import { board, moves, startKnownGame, tile } from './support/app.ts';
+import { board, moves, openProfile, startKnownGame, tile } from './support/app.ts';
 import {
   AFTER_TILE_11,
   AFTER_TILE_11_THEN_12,
@@ -13,7 +13,9 @@ import {
 import {
   boardEdge,
   pull,
+  renders,
   commitBatches,
+  countRenders,
   dragTo,
   flickDown,
   pressTile,
@@ -196,6 +198,18 @@ test('a quick short flick towards the gap moves the tile', async ({ page, reques
   await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
 });
 
+/** The known game opened again (no first-visit toast), the 3D board drawn, and tile 11 pressed. */
+async function pressAfterToast(page: Page, request: APIRequestContext) {
+  const nickname = uniqueNickname();
+  await startKnownGame(page, request, nickname);
+  await openProfile(page, nickname);
+  await expect(page.getByTestId('welcome')).toHaveCount(0);
+  await expect(page.getByTestId('scene')).toHaveAttribute('data-webgl', 'ready', {
+    timeout: 30_000,
+  });
+  return pressTile(page, 11);
+}
+
 /** One move (tile 11 down), then tile 12 pressed and held a little towards the gap. */
 async function holdTwelveAfterOneMove(page: Page, request: APIRequestContext) {
   await startKnownGame(page, request, uniqueNickname());
@@ -219,4 +233,21 @@ test('a reset while a tile is held lets go of it, and the drag moves nothing aft
   await page.mouse.up();
 
   await expect(board(page)).toHaveAttribute('data-board', KNOWN_BOARD);
+});
+
+test('a slow drag renders the page only when the tile is taken and let go, not per move', async ({
+  page,
+  request,
+}) => {
+  await countRenders(page);
+  const from = await pressAfterToast(page, request);
+  const before = await renders(page);
+
+  await dragTo(page, from, 0, from.cell * 0.25);
+  await expect(tile(page, 11)).toHaveClass(/sp-held/);
+  const during = (await renders(page)) - before;
+  await page.mouse.up();
+
+  // Taking the tile (its held class and data-held) is one render; 12 moves add none.
+  expect(during).toBeLessThanOrEqual(2);
 });

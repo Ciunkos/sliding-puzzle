@@ -4,10 +4,10 @@ import fc from 'fast-check';
 import { grid } from '../test-support/grid.ts';
 import { scriptedRng } from '../test-support/scripted-rng.ts';
 import {
-  aheadShare,
   createDust,
   dustAt,
   dustOpacity,
+  edgeFade,
   IMPACT_MS,
   nudgeDirection,
   SETTLE_MS,
@@ -15,7 +15,6 @@ import {
   springAt,
   springEasing,
   squashAt,
-  wallFade,
   wiggleAt,
 } from './effects.ts';
 
@@ -200,41 +199,13 @@ describe('dustOpacity', () => {
   });
 });
 
-describe('aheadShare', () => {
-  test('a puff in the middle of the board drifts its full reach ahead', () => {
-    assert.equal(aheadShare({ x: 0, y: 0 }, { x: 1, y: 0 }, 0.25), 1);
+describe('edgeFade', () => {
+  test('a mote well inside the drawing is its full size, at or past its edge it is gone', () => {
+    assert.deepEqual([edgeFade(0.5, 0.66), edgeFade(0.66, 0.66), edgeFade(0.7, 0.66)], [1, 0, 0]);
   });
 
-  test('a puff 0.125 from the wall it drifts toward drifts half its reach of 0.25', () => {
-    assert.equal(aheadShare({ x: 0.125, y: -0.375 }, { x: 0, y: -1 }, 0.25), 0.5);
-  });
-
-  test('a puff at or past the wall drifts none of the way ahead', () => {
-    assert.deepEqual(
-      [
-        aheadShare({ x: 0.5, y: 0 }, { x: 1, y: 0 }, 0.25),
-        aheadShare({ x: 0.75, y: 0 }, { x: 1, y: 0 }, 0.25),
-      ],
-      [0, 0],
-    );
-  });
-});
-
-describe('wallFade', () => {
-  test('a mote 0.06 or more inside the tray is its full size, at or past the wall it is gone', () => {
-    assert.deepEqual(
-      [
-        wallFade({ x: 0, y: 0 }),
-        wallFade({ x: 0.44, y: 0 }),
-        wallFade({ x: 0, y: -0.5 }),
-        wallFade({ x: 0.75, y: 0.1 }),
-      ],
-      [1, 1, 0, 0],
-    );
-  });
-
-  test('halfway through the last 0.06 before the wall a mote is half its size', () => {
-    assert.ok(Math.abs(wallFade({ x: 0.2, y: -0.47 }) - 0.5) < 1e-9);
+  test('halfway through the last 0.05 before the edge a mote is half its size', () => {
+    assert.ok(Math.abs(edgeFade(0.625, 0.65) - 0.5) < 1e-9);
   });
 });
 

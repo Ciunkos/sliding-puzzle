@@ -5,12 +5,6 @@
 import type { Rng } from './rng.ts';
 import type { Board, Size } from './rules.ts';
 
-/** A point or direction on the board, in board widths. */
-interface Vec2 {
-  x: number;
-  y: number;
-}
-
 /** How strongly the spring is damped: below 1 it overshoots once, by about 4.6%, then settles. */
 const DAMPING = 0.7;
 /** The spring's natural frequency in radians per millisecond. */
@@ -119,30 +113,17 @@ export function dustOpacity(t: number): number {
   return Math.min(1, t / DUST_FADE_IN_MS) * (1 - k) ** 2;
 }
 
-/** Half the width of the tray's floor: its inner walls, in board widths from the centre. */
-const WALL = 0.5;
+/** Over this last stretch before the edge of the drawing a mote shrinks away. */
+const EDGE_FADE = 0.05;
 
 /**
- * The share (0..1) of its usual drift `reach` a puff starting at `origin` may drift `ahead` (a
- * unit axis) before it meets the tray's wall: a cube landing against the rim puffs up and along it,
- * not through it.
+ * How big a mote `reach` from the board's centre is (the larger of its x and y, board widths), as
+ * a share of its size, when the drawing ends at `limit`: full until the last 0.05, then shrinking
+ * smoothly to nothing at the edge. The edge lies outside the box, over the page, so a puff spills
+ * over the frame and fades there instead of being cut by the canvas.
  */
-export function aheadShare(origin: Vec2, ahead: Vec2, reach: number): number {
-  const room = WALL - (origin.x * ahead.x + origin.y * ahead.y);
-  return Math.min(1, Math.max(0, room / reach));
-}
-
-/** Within this distance of the wall a mote shrinks away. */
-const WALL_FADE = 0.06;
-
-/**
- * How big a mote at `at` is, as a share of its size: full well inside the tray, shrinking smoothly
- * over the last 0.06 before the wall, nothing at or past it. So a puff fades at the wall instead
- * of being cut by the rim or the edge of the picture.
- */
-export function wallFade(at: Vec2): number {
-  const inside = WALL - Math.max(Math.abs(at.x), Math.abs(at.y));
-  const k = Math.min(1, Math.max(0, inside / WALL_FADE));
+export function edgeFade(reach: number, limit: number): number {
+  const k = Math.min(1, Math.max(0, (limit - reach) / EDGE_FADE));
   return k * k * (3 - 2 * k);
 }
 

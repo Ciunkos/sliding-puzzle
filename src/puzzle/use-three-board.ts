@@ -6,6 +6,7 @@ import { type RefObject, useEffect, useRef, useState } from 'react';
 import type { SceneSkin, TiltMode } from './look-model.ts';
 import type { Board, Size } from './rules.ts';
 import {
+  DRAW_INSET_SHARE,
   orientationTilt,
   type Orientation,
   pointerTilt,
@@ -14,6 +15,7 @@ import {
 } from './scene-model.ts';
 import { FPS_FLAG } from './use-fps-flag.ts';
 import { publishStats, qualityNow, rememberQuality } from './use-frame-quality.ts';
+import { attachScenePull } from './use-scene-drag.ts';
 import type { SceneSurface } from './use-scene-surface.ts';
 import { createRuntime, type SceneRuntime } from './use-three-runtime.ts';
 
@@ -95,6 +97,22 @@ interface Shown {
   detach: () => void;
 }
 
+/** The share of its box the canvas reaches past it on each side, as CSS. */
+const SPILL = `${String(DRAW_INSET_SHARE * 100)}%`;
+
+/**
+ * Makes the canvas reach past its box (the wrapper) on every side, so a landing puff can spill over
+ * the frame onto the page instead of being cut at the box's edge. The camera frames that larger
+ * drawing (DRAW_UNITS), so the board itself still sits exactly under the DOM buttons.
+ */
+function spill(canvas: HTMLCanvasElement): void {
+  canvas.style.position = 'absolute';
+  canvas.style.left = `-${SPILL}`;
+  canvas.style.top = `-${SPILL}`;
+  canvas.style.width = `calc(100% + 2 * ${SPILL})`;
+  canvas.style.height = `calc(100% + 2 * ${SPILL})`;
+}
+
 /**
  * Keeps the drawing buffer sized to the wrapper and the screen: on a resize, and when the window
  * moves to a screen of another pixel ratio. Setting a canvas's size clears it, even to the same
@@ -107,7 +125,8 @@ function fitTo(wrapper: HTMLDivElement, runtime: SceneRuntime, drawNow: () => vo
     if (wrapper.clientWidth === width && devicePixelRatio === ratio) return;
     width = wrapper.clientWidth;
     ratio = devicePixelRatio;
-    runtime.resize(width, ratio);
+    // The canvas reaches past its box (spill): it is that much wider than the wrapper.
+    runtime.resize(width * (1 + 2 * DRAW_INSET_SHARE), ratio);
     drawNow();
   };
   let screen: MediaQueryList | undefined;
@@ -145,6 +164,7 @@ function show(wrapper: HTMLDivElement, runtime: SceneRuntime, latest: RefObject<
     },
   );
   runtime.setBoard(props.board, props.finished, props.moves, performance.now());
+  spill(props.surface.canvas);
   wrapper.append(props.surface.canvas);
   const sizing = fitTo(wrapper, runtime, loop.drawNow);
   const detach = () => {
@@ -328,6 +348,17 @@ function useDrag(current: Live | undefined, drag: Board3DProps['drag']): void {
   }, [current, tile, progress]);
 }
 
+/** The direct line from the pointer handler (use-scene-drag.ts) moves the cube with no render. */
+function useScenePull(current: Live | undefined): void {
+  useEffect(() => {
+    if (current === undefined) return undefined;
+    return attachScenePull((tile, progress) => {
+      current.runtime.drag(tile, progress, performance.now());
+      current.invalidate();
+    });
+  }, [current]);
+}
+
 function boardRect(wrapper: HTMLElement) {
   const rect = wrapper.getBoundingClientRect();
   return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
@@ -380,6 +411,7 @@ export function useThreeBoard(props: Board3DProps): RefObject<HTMLDivElement | n
   useStateFeed(live, props);
   useNudge(live, props.nudge);
   useDrag(live, props.drag);
+  useScenePull(live);
   useTilt(live, props.tilt);
   return ref;
 }
