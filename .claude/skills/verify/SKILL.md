@@ -21,9 +21,10 @@ first failure (exit 1). It always stops the server it started. The screenshots g
 
 Open the screenshots. Do not stop at the pass lines. Look for:
 
-- nothing cut off or overlapping at phone width, and the footer below the game;
-- the board matches the step: the moves count, the tile that moved, green tiles and
-  "Solved" on the win, the picture on the tiles, the 3D board drawn (not blank);
+- one screen at phone width: menu and sound in the top corners, Reset and New game in the bottom
+  ones, nothing cut off or overlapping, no scroll;
+- the board matches the step: the moves count, the tile that moved, the win card under the board
+  (not over it) on the win, the picture on the tiles, the 3D board drawn (not blank);
 - the offline notice in the offline step, and gone when back online;
 - no error text anywhere.
 

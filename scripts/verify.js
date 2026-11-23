@@ -50,6 +50,19 @@ const board = (page) => page.getByTestId('board');
 const moves = (page) => page.getByTestId('moves');
 const boardText = (page) => board(page).getAttribute('data-board');
 const nickname = async (page) => (await page.getByTestId('current-profile').textContent()) ?? '';
+const menu = (page) => page.getByTestId('menu');
+
+/** Opens the menu with its corner button, as a player does; it holds the profile and options. */
+async function openMenu(page) {
+  if (!(await menu(page).isVisible())) await page.getByTestId('menu-button').tap();
+  await expect(menu(page)).toBeVisible();
+}
+
+/** Closes the menu with its own close button. */
+async function closeMenu(page) {
+  if (await menu(page).isVisible()) await page.getByTestId('menu-close').tap();
+  await expect(menu(page)).toBeHidden();
+}
 
 /** A tile next to the blank, and the direction from it to the blank (one of dx, dy is 0). */
 function slidable(boardValue) {
@@ -166,8 +179,11 @@ function steps(origin, browser) {
       'a picture skin replaces the numbers',
       'picture-skin',
       async ({ page }) => {
-        await page.getByTestId('skin-picker').locator('summary').tap();
+        await openMenu(page);
+        const picker = page.getByTestId('skin-picker');
+        if ((await picker.getAttribute('open')) === null) await picker.locator('summary').tap();
         await page.getByTestId('skin-rocket').tap();
+        await closeMenu(page);
         await expect(board(page)).toHaveAttribute('data-skin', 'rocket');
       },
     ],
@@ -175,8 +191,10 @@ function steps(origin, browser) {
       '3D on draws the 3D board',
       '3d-on',
       async ({ page }) => {
+        await openMenu(page);
         const toggle = page.getByTestId('toggle-3d');
         if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.tap();
+        await closeMenu(page);
         await expect(page.getByTestId('scene')).toHaveAttribute('data-webgl', 'ready', {
           timeout: SCENE_TIMEOUT,
         });
@@ -186,8 +204,10 @@ function steps(origin, browser) {
       '3D off leaves the flat board',
       '3d-off',
       async ({ page }) => {
+        await openMenu(page);
         await page.getByTestId('toggle-3d').tap();
         await expect(page.getByTestId('toggle-3d')).toHaveAttribute('aria-pressed', 'false');
+        await closeMenu(page);
         await expect(page.getByTestId('scene')).toHaveCount(0);
         await expect(board(page)).toBeVisible();
       },
@@ -218,9 +238,10 @@ function steps(origin, browser) {
       },
     ],
     [
-      'the footer says what usage statistics count, and its switch answers',
-      'footer',
+      'the menu says what usage statistics count, and its switch answers',
+      'usage',
       async ({ page }) => {
+        await openMenu(page);
         const usage = page.getByTestId('usage-toggle');
         await usage.scrollIntoViewIfNeeded();
         await expect(page.getByTestId('usage-statistics')).toContainText('never your nickname');
