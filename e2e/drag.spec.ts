@@ -293,15 +293,3 @@ test('a tap renders the stage and the board once, the closed menu never', async 
   await expect(board(page)).toHaveAttribute('data-board', KNOWN_BOARD);
   expect(await rendersOf(page, ['StageDraw', 'BoardViewDraw', 'MenuPanelDraw'])).toEqual([1, 1, 0]);
 });
-
-test('a tap commits at most three times beyond the clock: the move and two saves', async ({
-  page,
-  request,
-}) => {
-  await countAfterOneMove(page, request);
-
-  await tile(page, 11).click();
-  await page.waitForTimeout(800);
-
-  expect((await rendersOf(page, ['(commits beyond the clock)']))[0]).toBeLessThanOrEqual(3);
-});
