@@ -1,5 +1,5 @@
 // Steps and locators of the app under test. No expected values are decided here.
-import type { APIRequestContext, Page } from '@playwright/test';
+import type { APIRequestContext, Locator, Page } from '@playwright/test';
 import { expect } from './harness.ts';
 import { openMenu } from './menu.ts';
 
@@ -67,26 +67,6 @@ export const movableTiles = (page: Page) =>
 /** The button that starts a new game of `size` x `size`. */
 export const sizeChoice = (page: Page, size: number) => page.getByTestId(`size-${String(size)}`);
 
-/**
- * Drags the pointer from the middle of tile `number` by (dx, dy) pixels in small steps: a swipe.
- * Uses the mouse, which both projects support; the board reads pointer events, whatever the device.
- */
-export async function swipeFromTile(
-  page: Page,
-  number: number,
-  dx: number,
-  dy: number,
-): Promise<void> {
-  const box = await tile(page, number).boundingBox();
-  expect(box, `tile ${String(number)} is on screen`).not.toBeNull();
-  const x = (box?.x ?? 0) + (box?.width ?? 0) / 2;
-  const y = (box?.y ?? 0) + (box?.height ?? 0) / 2;
-  await page.mouse.move(x, y);
-  await page.mouse.down();
-  await page.mouse.move(x + dx, y + dy, { steps: 6 });
-  await page.mouse.up();
-}
-
 /** The game's message line: an error, or a notice such as being offline. */
 export const gameMessage = (page: Page) => page.getByTestId('game-error');
 
@@ -111,3 +91,19 @@ export const timer = (page: Page) => page.getByTestId('timer');
 export const winResult = (page: Page) => page.getByTestId('result');
 /** The best results on the current board size. */
 export const bestList = (page: Page) => page.getByTestId('best-list');
+
+/**
+ * Clicks `target` (a tile) and waits until the move it makes is saved: the server answered its
+ * POST of moves. For a step that then reads or replaces the game on the server.
+ */
+export async function clickAndSave(page: Page, target: Locator): Promise<void> {
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        response.url().endsWith('/moves') &&
+        response.ok(),
+    ),
+    target.click(),
+  ]);
+}

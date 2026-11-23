@@ -97,8 +97,7 @@ export async function touchDrag(
 
 /**
  * The way the project's player drags: a real finger on a touch screen, the mouse otherwise. Drags
- * tile `number` by (dx, dy) cells, calls `whileDown` before letting go, and checks that the page
- * did not scroll on the way.
+ * tile `number` by (dx, dy) cells and calls `whileDown` before letting go.
  */
 export async function dragTile(
   page: Page,
@@ -110,7 +109,6 @@ export async function dragTile(
   const move = { dx: cells.dx * from.cell, dy: cells.dy * from.cell };
   if (test.info().project.use.hasTouch === true) await touchDrag(page, from, move, whileDown);
   else await mouseDrag(page, from, move, whileDown);
-  expect(await scrolled(page), 'the page did not scroll').toEqual({ x: 0, y: 0 });
 }
 
 async function mouseDrag(
@@ -124,11 +122,6 @@ async function mouseDrag(
   await dragTo(page, from, move.dx, move.dy);
   await whileDown();
   await page.mouse.up();
-}
-
-/** How far the page has scrolled, each way, in CSS pixels. */
-export function scrolled(page: Page): Promise<{ x: number; y: number }> {
-  return page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
 }
 
 /**

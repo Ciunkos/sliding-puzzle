@@ -10,29 +10,34 @@ const speaker = (page: Page) => page.getByTestId('sound-toggle');
 const music = (page: Page) => page.getByTestId('sound-music');
 const effects = (page: Page) => page.getByTestId('sound-effects');
 
-/** Music off in the menu: after a reload it is off, and the effects are still on. */
-async function musicOff(page: Page, nickname: string): Promise<void> {
+/** Effects off with music on: after a reload the effects are off and the music still on. */
+async function effectsOffAlone(page: Page, nickname: string): Promise<void> {
   await openMenu(page);
+  await effects(page).click();
+  await openProfile(page, nickname);
+  await expect(effects(page)).not.toBeChecked();
+  await expect(music(page)).toBeChecked();
+}
+
+/** Effects back on and music off: after a reload the music is off and the effects on. */
+async function musicOffAlone(page: Page, nickname: string): Promise<void> {
+  await openMenu(page);
+  await effects(page).click();
   await music(page).click();
   await openProfile(page, nickname);
   await expect(music(page)).not.toBeChecked();
   await expect(effects(page)).toBeChecked();
 }
 
-test('music, effects and the speaker are switched each on its own, and kept after a reload', async ({
+test('effects and music are switched each on its own, the speaker mutes, all kept after a reload', async ({
   page,
   request,
 }) => {
   const nickname = uniqueNickname();
   await startKnownGame(page, request, nickname);
-  await test.step('music off on its own', () => musicOff(page, nickname));
-  await test.step('effects off too', async () => {
-    await openMenu(page);
-    await effects(page).click();
-    await openProfile(page, nickname);
-    await expect(effects(page)).not.toBeChecked();
-  });
-  await test.step('the speaker mutes everything', async () => {
+  await test.step('effects off on their own', () => effectsOffAlone(page, nickname));
+  await test.step('music off on its own', () => musicOffAlone(page, nickname));
+  await test.step('the speaker mutes, and that is kept', async () => {
     await expect(speaker(page)).toHaveAttribute('aria-pressed', 'true');
     await speaker(page).click();
     await openProfile(page, nickname);

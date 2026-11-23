@@ -2,7 +2,7 @@
 // that lands in a slide is a dropped frame on a phone, so the clock, a tap and a drag each render
 // only what they change. The drag comes first, before a move starts the clock.
 import type { APIRequestContext, Page } from '@playwright/test';
-import { board, openProfile, startKnownGame, tile } from './support/app.ts';
+import { board, clickAndSave, openProfile, startKnownGame, tile } from './support/app.ts';
 import { AFTER_TILE_11, KNOWN_BOARD } from './support/boards.ts';
 import {
   countComponentRenders,
@@ -40,9 +40,12 @@ async function dragCommits(page: Page): Promise<number> {
   return during;
 }
 
-/** The first move starts the clock; once the screen has settled, renders are counted afresh. */
+/**
+ * The first move starts the clock; once it is saved (the save hint changes the bar) and the
+ * screen has settled, renders are counted afresh.
+ */
 async function firstMoveSettled(page: Page): Promise<void> {
-  await tile(page, 11).click();
+  await clickAndSave(page, tile(page, 11));
   await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
   await page.waitForTimeout(500);
   await resetRendered(page);

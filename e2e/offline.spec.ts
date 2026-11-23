@@ -53,7 +53,7 @@ test('quick taps, and a move made offline in a tab that was then closed, are all
   });
   await test.step('offline, a tap shows at once, then the tab is closed', () =>
     tapWhileOffline(page, context));
-  await test.step('back online, a new tab of the profile sends the stored move', () =>
+  await test.step('back online, a new tab of the profile shows the stored move', () =>
     reopenOnline(context, nickname));
 
   await openProfileUntilMoves(otherBrowserPage, nickname, 'Moves: 3');

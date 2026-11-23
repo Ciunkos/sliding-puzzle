@@ -123,7 +123,7 @@ test('without WebGL the menu says why the board is flat, and the flat board play
   ).toBeVisible();
   await closeMenu(page);
   await tile(page, 11).click();
-  await expect(scene(page)).toHaveCount(0);
+  await expect(board(page)).not.toHaveClass(/sp-layered/);
   await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
 });
 

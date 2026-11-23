@@ -56,11 +56,18 @@ async function pressOffTheBoard(page: Page): Promise<void> {
   await page.mouse.up();
 }
 
-/** Neither a right-click drag nor a press let go off the board moves anything. */
+/**
+ * A right-click drag moves nothing; a press let go off the board has ended, so tile 11 then
+ * answers a tap, and another back.
+ */
 async function startsNothing(page: Page): Promise<void> {
   await rightClickDrag(page);
-  await pressOffTheBoard(page);
   await expect(board(page)).toHaveAttribute('data-board', KNOWN_BOARD);
+  await pressOffTheBoard(page);
+  await tile(page, 11).click();
+  await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
+  await tile(page, 11).click();
+  await expect(moves(page)).toHaveText('Moves: 2');
 }
 
 /** Just short of the threshold in 16 ms: only the flick's speed moves tile 11 down. */
@@ -72,7 +79,10 @@ async function flicks(page: Page): Promise<void> {
   await expect(board(page)).toHaveAttribute('data-board', KNOWN_BOARD);
 }
 
-/** Past the threshold tile 11 moves with the finger down, let go in the same update. */
+/**
+ * Past the threshold tile 11 moves with the finger down, let go in the same update; lifting the
+ * finger adds no second move (the fifth move of the flow stays the fifth).
+ */
 async function movesBeforeTheLift(page: Page): Promise<void> {
   const from = await pressTile(page, 11);
   await dragTo(page, from, 0, from.cell * 0.15);
@@ -80,6 +90,7 @@ async function movesBeforeTheLift(page: Page): Promise<void> {
   await dragTo(page, from, 0, from.cell * 0.45);
   await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
   await page.mouse.up();
+  await expect(moves(page)).toHaveText('Moves: 5');
   expect((await commitBatches(page))[0]).toEqual({ released: true, moved: true });
 }
 
@@ -113,7 +124,7 @@ test('a held tile springs back short of a third of a cell, moves past it, and a 
 }) => {
   await startKnownGame(page, request, uniqueNickname());
   await test.step('held short of the threshold, it springs back', () => springsBack(page));
-  await test.step('a right-click or a press off the board starts no drag', () =>
+  await test.step('a right-click starts no drag; a press let go off the board ends', () =>
     startsNothing(page));
   await test.step('a quick short flick moves it, a tap brings it back', () => flicks(page));
   await test.step('past the threshold it moves before the finger lifts', () =>
@@ -160,17 +171,24 @@ test('a row is pushed from its far end and heard; a long pull moves only the til
   await expect(moves(page)).toHaveText('Moves: 2');
 });
 
-/** Only 11, 14 and 15 can move; tile 1 tapped wiggles and moves nothing, an impossible key neither. */
+/** Only 11, 14 and 15 can move; tile 1 tapped wiggles, moves nothing, and the wiggle ends. */
 async function onlyNextToTheGap(page: Page): Promise<void> {
   await expect(movableTiles(page)).toHaveCount(3);
   await expect(tile(page, 1)).toBeDisabled();
   await tile(page, 1).dispatchEvent('click');
   await expect(tile(page, 1)).toHaveAttribute('data-nudge', /^[ab]$/);
   await expect(page.locator('[data-nudge]')).toHaveCount(0);
-  // The gap is on the bottom row: nothing is below it to slide up, even with the key held.
+}
+
+/**
+ * The gap is on the bottom row: nothing is below it to slide up. The key held down moves nothing
+ * and wiggles no tile, read at once after it is let go (a wiggle would still be on).
+ */
+async function impossibleKeyHeld(page: Page): Promise<number> {
   await page.keyboard.down('ArrowUp');
   await page.keyboard.down('ArrowUp');
   await page.keyboard.up('ArrowUp');
+  return page.locator('[data-nudge]').count();
 }
 
 /** Down slides 11, left slides 12, D slides it back; focus follows the moved tile. */
@@ -191,7 +209,12 @@ test('only tiles next to the gap move; the others wiggle; the keys slide tiles a
 }) => {
   await startKnownGame(page, request, uniqueNickname());
   await tile(page, 1).focus();
-  await test.step('only tiles next to the gap move', () => onlyNextToTheGap(page));
+  await test.step('only tiles next to the gap move; the others wiggle', () =>
+    onlyNextToTheGap(page));
+  await test.step('an impossible key, held, neither moves nor wiggles', async () => {
+    expect(await impossibleKeyHeld(page)).toBe(0);
+    await expect(moves(page)).toHaveText('Moves: 0');
+  });
   await test.step('the arrow keys and WASD slide tiles', () => arrowsAndWasd(page));
   await test.step('Ctrl+S is a shortcut, not a move; Tab leaves the board', async () => {
     await page.keyboard.press('Control+s');
@@ -200,5 +223,4 @@ test('only tiles next to the gap move; the others wiggle; the keys slide tiles a
   });
 
   await expect(moves(page)).toHaveText('Moves: 3');
-  await expect(page.locator('[data-nudge]')).toHaveCount(0);
 });

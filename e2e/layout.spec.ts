@@ -25,7 +25,7 @@ async function oneScreen(page: Page, size: { width: number; height: number }): P
   await page.setViewportSize(size);
   await expect(board(page)).toBeInViewport({ ratio: 1 });
   await expect(newGameButton(page)).toBeInViewport({ ratio: 1 });
-  expect(await scrolls(page)).toEqual({ vertically: false, sideways: false });
+  await expect.poll(() => scrolls(page)).toEqual({ vertically: false, sideways: false });
 }
 
 /** On a small phone, without motion (the menu measured at its size): every corner target is big. */
@@ -84,15 +84,15 @@ async function smallPhoneWin(page: Page): Promise<void> {
   await expect(page.getByTestId('win')).toBeInViewport({ ratio: 1 });
   await expect(newGameButton(page)).toBeInViewport({ ratio: 1 });
   expect(await overlap(page.getByTestId('win'), newGameButton(page))).toBe(false);
-  expect(await scrolls(page)).toEqual({ vertically: false, sideways: false });
+  await expect.poll(() => scrolls(page)).toEqual({ vertically: false, sideways: false });
 }
 
-/** The known game solved with its one move, without motion so the win card is where it ends up. */
+/** The known game solved with its one move (said in the singular), without motion so the win card is where it ends up. */
 async function solveKnownGame(page: Page, request: APIRequestContext): Promise<void> {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await startKnownGame(page, request, uniqueNickname());
   await tile(page, 15).click();
-  await expect(solvedBanner(page)).toBeVisible();
+  await expect(solvedBanner(page)).toHaveText('Solved in 1 move!');
 }
 
 const CLEAR = { board: false, newGame: false, reset: false };

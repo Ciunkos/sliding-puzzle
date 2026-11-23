@@ -8,6 +8,7 @@ import {
   moves,
   openProfile,
   openSwitcher,
+  profileNotice,
   seedKnownGame,
   solvedBanner,
   startKnownGame,
@@ -19,6 +20,7 @@ import { expect, expectAccessible, test, uniqueNickname } from './support/harnes
 import { closeButton, holdsFocus, menu, menuButton, welcome } from './support/menu.ts';
 
 const GENERATED_PROFILE_URL = /\/sliding-puzzle\/p\/[a-z]+-[a-z]+-\d{3}$/;
+const NO_LOGIN = 'There is no login. Anyone with this link can play this profile.';
 
 /** Three names that break the rules, each refused with what is wrong. */
 async function refusesBadNames(page: Page): Promise<void> {
@@ -80,16 +82,20 @@ async function typesNames(page: Page, second: string): Promise<void> {
 /** Back shows the first profile's game, Forward the second's; a new random one, and Back. */
 async function history(page: Page): Promise<void> {
   await page.goBack();
+  await expect(page).toHaveURL(/-one$/);
   await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_11);
   await page.goForward();
   await newRandomThenBack(page);
 }
 
+/** On the second profile's game, a new random profile is a fresh game; Back returns. */
 async function newRandomThenBack(page: Page): Promise<void> {
   await expect(page).toHaveURL(/-two$/);
+  await expect(moves(page)).toHaveText('Moves: 0');
   await openSwitcher(page);
   await page.getByRole('button', { name: 'New random profile' }).click();
   await expect(page).toHaveURL(GENERATED_PROFILE_URL);
+  await expect(moves(page)).toHaveText('Moves: 0');
   await page.goBack();
   await expect(page).toHaveURL(/-two$/);
 }
@@ -118,17 +124,17 @@ async function menuByKeyboard(page: Page): Promise<void> {
   await page.keyboard.press('Enter');
   await expect(closeButton(page)).toBeFocused();
   await page.keyboard.press('Shift+Tab');
+  await expect(closeButton(page)).not.toBeFocused();
   expect(await holdsFocus(menu(page))).toBe(true);
   await page.keyboard.press('Tab');
   await expect(closeButton(page)).toBeFocused();
-  await expect(menu(page).getByTestId('menu-profile-notice')).toHaveText(
-    'There is no login. Anyone with this link can play this profile.',
-  );
 }
 
-/** The first visit with the switcher open, and the invalid-name screen. */
+/** The first visit once its game is on screen, with the switcher open; the invalid-name screen. */
 async function profileScreens(page: Page): Promise<void> {
   await page.goto('/sliding-puzzle');
+  await expect(moves(page)).toHaveText('Moves: 0');
+  await expect(profileNotice(page)).toBeVisible();
   await openSwitcher(page);
   await expectAccessible(page);
   await page.goto('/sliding-puzzle/p/a');
@@ -136,23 +142,28 @@ async function profileScreens(page: Page): Promise<void> {
   await expectAccessible(page);
 }
 
+/** The game, then its menu opened by keyboard: who is playing and the notice; Escape closes it. */
+async function gameAndMenu(page: Page, request: APIRequestContext): Promise<void> {
+  await startKnownGame(page, request, uniqueNickname());
+  await expectAccessible(page);
+  await menuByKeyboard(page);
+  await expect(menu(page).getByTestId('current-profile')).toBeVisible();
+  await expect(menu(page).getByTestId('menu-profile-notice')).toHaveText(NO_LOGIN);
+  await expectAccessible(page);
+  await page.keyboard.press('Escape');
+  await expect(menuButton(page)).toBeFocused();
+}
+
 test('every screen passes axe, and the menu is driven by the keyboard', async ({
   page,
   request,
 }) => {
   await test.step('the profile screens', () => profileScreens(page));
-  await test.step('the game, and the menu opened and closed with the keyboard', async () => {
-    await startKnownGame(page, request, uniqueNickname());
-    await expectAccessible(page);
-    await menuByKeyboard(page);
-    await expectAccessible(page);
-    await page.keyboard.press('Escape');
-    await expect(menuButton(page)).toBeFocused();
-  });
-  await test.step('the solved game', async () => {
+  await test.step('the game, and the menu opened and closed with the keyboard', () =>
+    gameAndMenu(page, request));
+  await test.step('the solved game, once its win is on screen', async () => {
     await tile(page, 15).click();
+    await expect(solvedBanner(page)).toHaveText('Solved in 1 move!');
     await expectAccessible(page);
   });
-
-  await expect(solvedBanner(page)).toBeVisible();
 });
