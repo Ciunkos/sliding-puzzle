@@ -151,6 +151,19 @@ breaks it cannot be committed:
 - No fakes of our own modules: tests use the real in-memory SQLite, and the D1 driver is tested
   against a real local D1.
 
+End-to-end tests are few, long and deep: each one plays on from where its last step left the
+player, with `test.step` for each stage, so one browser session checks a lot.
+
+- `e2e/journey.spec.ts` is the core scenario. A player arrives, plays (tap, drag, keys), comes
+  back (refresh, new tab, another browser), wins, picks a picture and 3D, goes offline and back,
+  and opts out of usage statistics. It runs on a phone with touch and on a desktop with a mouse.
+- The other specs are auxiliary flows, one file per area, each with one to four tests:
+  - `moving`: every way a hand can move tiles, or must not;
+  - `look`, `sound`, `profiles` (with the menu and axe), `layout` (one page resized through every
+    screen), `smoothness` (render counts), `offline` (saving);
+  - `app`: the installed build with its service worker;
+  - `worker`: the deploy rehearsal on the Worker and D1.
+
 `npm run mutate` shows whether the tests can fail. `gates/hooks.test.ts` shows that the git hooks
 refuse a bad commit or push.
 

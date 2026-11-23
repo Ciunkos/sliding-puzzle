@@ -1,5 +1,6 @@
 // The page layout: the game is the whole screen, nothing scrolls, and the board is whole on screen.
-// Each test sets its own screen size, so it means the same in both projects.
+// Each flow resizes one page through the screen sizes it is made for, so it means the same in
+// both projects.
 import type { APIRequestContext, Page } from '@playwright/test';
 import { board, invalidProfile, solvedBanner, startKnownGame, tile } from './support/app.ts';
 import { expect, test, uniqueNickname } from './support/harness.ts';
@@ -19,64 +20,40 @@ import {
 } from './support/layout.ts';
 import { menuButton, openMenu } from './support/menu.ts';
 
-test('on a 320 x 568 phone the whole game is on one screen that does not scroll', async ({
-  page,
-  request,
-}) => {
+/** At `size`, the board and New game are whole on the one screen, and nothing scrolls. */
+async function oneScreen(page: Page, size: { width: number; height: number }): Promise<void> {
+  await page.setViewportSize(size);
+  await expect(board(page)).toBeInViewport({ ratio: 1 });
+  await expect(newGameButton(page)).toBeInViewport({ ratio: 1 });
+  expect(await scrolls(page)).toEqual({ vertically: false, sideways: false });
+}
+
+/** On a small phone, without motion (the menu measured at its size): every corner target is big. */
+async function bigTargets(page: Page): Promise<void> {
   await page.setViewportSize(SMALL_PHONE);
-  await startKnownGame(page, request, uniqueNickname());
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect(await targetSize(menuButton(page))).toBeGreaterThanOrEqual(44);
+  expect(await targetSize(page.getByTestId('sound-toggle'))).toBeGreaterThanOrEqual(44);
+  await openMenu(page);
+  expect(await targetSize(page.locator('.sp-sound-switch').first())).toBeGreaterThanOrEqual(44);
+}
 
-  await expect(board(page)).toBeInViewport({ ratio: 1 });
-  await expect(newGameButton(page)).toBeInViewport({ ratio: 1 });
-  expect(await scrolls(page)).toEqual({ vertically: false, sideways: false });
-});
-
-test('on a 360 x 640 phone the whole game is on one screen that does not scroll', async ({
+test('from a small phone to a desktop the whole game is one screen that does not scroll', async ({
   page,
   request,
 }) => {
-  await page.setViewportSize(PHONE);
   await startKnownGame(page, request, uniqueNickname());
-
-  await expect(board(page)).toBeInViewport({ ratio: 1 });
-  expect(await scrolls(page)).toEqual({ vertically: false, sideways: false });
-});
-
-test('on a 390 x 844 phone the board, the menu and both actions are on the one screen', async ({
-  page,
-  request,
-}) => {
-  await page.setViewportSize(TALL_PHONE);
-  await startKnownGame(page, request, uniqueNickname());
-
-  await expect(board(page)).toBeInViewport({ ratio: 1 });
-  await expect(menuButton(page)).toBeInViewport({ ratio: 1 });
-  await expect(resetButton(page)).toBeInViewport({ ratio: 1 });
-  await expect(newGameButton(page)).toBeInViewport({ ratio: 1 });
-  expect(await scrolls(page)).toEqual({ vertically: false, sideways: false });
-});
-
-test('on an upright tablet the whole game is on one screen that does not scroll', async ({
-  page,
-  request,
-}) => {
-  await page.setViewportSize(TABLET);
-  await startKnownGame(page, request, uniqueNickname());
-
-  await expect(board(page)).toBeInViewport({ ratio: 1 });
-  expect(await scrolls(page)).toEqual({ vertically: false, sideways: false });
-});
-
-test('on a desktop screen the whole game is on one screen that does not scroll', async ({
-  page,
-  request,
-}) => {
-  await page.setViewportSize(DESKTOP);
-  await startKnownGame(page, request, uniqueNickname());
-
-  await expect(board(page)).toBeInViewport({ ratio: 1 });
-  await expect(newGameButton(page)).toBeInViewport({ ratio: 1 });
-  expect(await scrolls(page)).toEqual({ vertically: false, sideways: false });
+  await test.step('320 x 568, a small phone', () => oneScreen(page, SMALL_PHONE));
+  await test.step('360 x 640, a common Android phone', () => oneScreen(page, PHONE));
+  await test.step('768 x 1024, an upright tablet', () => oneScreen(page, TABLET));
+  await test.step('1440 x 900, a laptop', () => oneScreen(page, DESKTOP));
+  await test.step('390 x 844, an iPhone: the menu and Reset too', async () => {
+    await oneScreen(page, TALL_PHONE);
+    await expect(menuButton(page)).toBeInViewport({ ratio: 1 });
+    await expect(resetButton(page)).toBeInViewport({ ratio: 1 });
+  });
+  await test.step('on a small phone every corner button and switch is big enough to tap', () =>
+    bigTargets(page));
 });
 
 test('a short page such as an unusable profile name keeps the usage switch on screen', async ({
@@ -89,66 +66,9 @@ test('a short page such as an unusable profile name keeps the usage switch on sc
   await expect(page.getByTestId('usage-statistics')).toBeInViewport({ ratio: 1 });
 });
 
-test('on a small phone the corner buttons and the sound switches are big enough to tap', async ({
-  page,
-  request,
-}) => {
-  await page.setViewportSize(SMALL_PHONE);
-  // Without motion: the menu is measured at its size, not while it springs open.
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await startKnownGame(page, request, uniqueNickname());
-  expect(await targetSize(menuButton(page))).toBeGreaterThanOrEqual(44);
-  expect(await targetSize(page.getByTestId('sound-toggle'))).toBeGreaterThanOrEqual(44);
-  await openMenu(page);
-
-  expect(await targetSize(page.locator('.sp-sound-switch').first())).toBeGreaterThanOrEqual(44);
-});
-
-/** The known game solved with its one move, without motion so the win card is where it ends up. */
-async function solveKnownGame(page: Page, request: APIRequestContext): Promise<void> {
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await startKnownGame(page, request, uniqueNickname());
-  await tile(page, 15).click();
-  await expect(solvedBanner(page)).toBeVisible();
-}
-
-test('on a tall phone the win card leaves the whole solved picture in view', async ({
-  page,
-  request,
-}) => {
-  await page.setViewportSize(TALL_PHONE);
-  await solveKnownGame(page, request);
-
-  expect(await overlap(page.getByTestId('win'), board(page))).toBe(false);
-  await expect(page.getByTestId('win')).toBeInViewport({ ratio: 1 });
-});
-
-test('on a desktop screen the win card leaves the whole solved picture in view', async ({
-  page,
-  request,
-}) => {
-  await page.setViewportSize(DESKTOP);
-  await solveKnownGame(page, request);
-
-  expect(await overlap(page.getByTestId('win'), board(page))).toBe(false);
-  await expect(page.getByTestId('win')).toBeInViewport({ ratio: 1 });
-});
-
-test('on a small phone the solved game, its win card and New game fit on one screen', async ({
-  page,
-  request,
-}) => {
-  await page.setViewportSize(SMALL_PHONE);
-  await solveKnownGame(page, request);
-
-  await expect(page.getByTestId('win')).toBeInViewport({ ratio: 1 });
-  await expect(newGameButton(page)).toBeInViewport({ ratio: 1 });
-  expect(await overlap(page.getByTestId('win'), newGameButton(page))).toBe(false);
-  expect(await scrolls(page)).toEqual({ vertically: false, sideways: false });
-});
-
-/** The win card is on screen, and over none of the board, New game and Reset. */
-async function cardClear(page: Page) {
+/** The win card at `size`: on screen, and over none of the board, New game and Reset. */
+async function cardClear(page: Page, size: { width: number; height: number }) {
+  await page.setViewportSize(size);
   const card = page.getByTestId('win');
   await expect(card).toBeInViewport({ ratio: 1 });
   return {
@@ -158,32 +78,40 @@ async function cardClear(page: Page) {
   };
 }
 
-test('on an upright tablet the win card is clear of the board and both actions', async ({
+/** On a small phone the card, New game and the solved game fit one screen, apart. */
+async function smallPhoneWin(page: Page): Promise<void> {
+  await page.setViewportSize(SMALL_PHONE);
+  await expect(page.getByTestId('win')).toBeInViewport({ ratio: 1 });
+  await expect(newGameButton(page)).toBeInViewport({ ratio: 1 });
+  expect(await overlap(page.getByTestId('win'), newGameButton(page))).toBe(false);
+  expect(await scrolls(page)).toEqual({ vertically: false, sideways: false });
+}
+
+/** The known game solved with its one move, without motion so the win card is where it ends up. */
+async function solveKnownGame(page: Page, request: APIRequestContext): Promise<void> {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await startKnownGame(page, request, uniqueNickname());
+  await tile(page, 15).click();
+  await expect(solvedBanner(page)).toBeVisible();
+}
+
+const CLEAR = { board: false, newGame: false, reset: false };
+
+test('at every size the win card leaves the solved picture and both actions in view', async ({
   page,
   request,
 }) => {
-  await page.setViewportSize(TABLET);
   await solveKnownGame(page, request);
-
-  expect(await cardClear(page)).toEqual({ board: false, newGame: false, reset: false });
-});
-
-test('on a 1024 x 768 screen the win card is clear of the board and both actions', async ({
-  page,
-  request,
-}) => {
-  await page.setViewportSize(LANDSCAPE_TABLET);
-  await solveKnownGame(page, request);
-
-  expect(await cardClear(page)).toEqual({ board: false, newGame: false, reset: false });
-});
-
-test('in a nearly square window the win card is clear of the board and both actions', async ({
-  page,
-  request,
-}) => {
-  await page.setViewportSize(SQUARE_WINDOW);
-  await solveKnownGame(page, request);
-
-  expect(await cardClear(page)).toEqual({ board: false, newGame: false, reset: false });
+  await test.step('390 x 844, an iPhone', async () => {
+    expect((await cardClear(page, TALL_PHONE)).board).toBe(false);
+  });
+  await test.step('1440 x 900, a laptop', async () => {
+    expect((await cardClear(page, DESKTOP)).board).toBe(false);
+  });
+  await test.step('768 x 1024, 1024 x 768 and 1000 x 850: clear of all three', async () => {
+    expect(await cardClear(page, TABLET)).toEqual(CLEAR);
+    expect(await cardClear(page, LANDSCAPE_TABLET)).toEqual(CLEAR);
+    expect(await cardClear(page, SQUARE_WINDOW)).toEqual(CLEAR);
+  });
+  await test.step('320 x 568, a small phone', () => smallPhoneWin(page));
 });

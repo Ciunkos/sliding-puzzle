@@ -65,7 +65,14 @@ async function expectSentWhenOnline(
   await expect(moves(other)).toHaveText('Moves: 1');
 }
 
-test('the worker script, the manifest and the registration cover the app without a slash', async ({
+/** The api answered twice from inside the page: both times over the network, not by the worker. */
+async function apiFromNetwork(page: Page): Promise<boolean[]> {
+  const first = await fetchFromPage(page, '/sliding-puzzle/api/health');
+  const second = await fetchFromPage(page, '/sliding-puzzle/api/health');
+  return [first.fromServiceWorker(), second.fromServiceWorker()];
+}
+
+test('the worker, the manifest and the registration cover the app, and the api is never cached', async ({
   page,
   request,
 }) => {
@@ -77,6 +84,9 @@ test('the worker script, the manifest and the registration cover the app without
     await page.goto('/sliding-puzzle');
     expect(await untilControlled(page)).toMatch(/\/sliding-puzzle$/);
     await expect.poll(() => isControlled(page)).toBe(true);
+  });
+  await test.step('the api is always asked over the network', async () => {
+    expect(await apiFromNetwork(page)).toEqual([false, false]);
   });
 });
 
@@ -128,13 +138,6 @@ test('a path that only starts with the app name is not answered by the worker', 
   await page.context().close();
 });
 
-test('the api is always asked over the network, never from a cache', async ({ page }) => {
-  await openInstalled(page, 'app-api');
-  const first = await fetchFromPage(page, '/sliding-puzzle/api/health');
-  const second = await fetchFromPage(page, '/sliding-puzzle/api/health');
-  expect([first.fromServiceWorker(), second.fromServiceWorker()]).toEqual([false, false]);
-});
-
 test('a first visit on a slow phone moves nothing on screen while the game and the 3D board arrive', async ({
   page,
 }) => {
@@ -142,27 +145,22 @@ test('a first visit on a slow phone moves nothing on screen while the game and t
   expect(await firstVisitLayoutShift(page)).toBeLessThanOrEqual(0.02);
 });
 
-test('a new version is offered, and Reload switches to it', async ({ page }) => {
+test('a new version is offered, the corners stay usable, and Reload switches to it', async ({
+  page,
+}) => {
   await openInstalled(page, 'app-update');
   await test.step('a new worker is published: the notice appears', async () => {
     await publishNewWorker(page);
     await expect(page.getByTestId('update-notice')).toContainText('A new version is ready.');
+  });
+  await test.step('the menu button in the corner still opens the menu', async () => {
+    await menuButton(page).click();
+    await expect(menu(page)).toBeVisible();
+    await page.keyboard.press('Escape');
   });
   await test.step('Reload: the page reloads under the new worker', async () => {
     await Promise.all([page.waitForEvent('load'), page.getByTestId('update-reload').click()]);
     await expect(board(page)).toBeVisible();
     expect(await controllerScript(page)).toMatch(/\/sliding-puzzle\/sw\.js\?next$/);
   });
-});
-
-test('while a new version is offered, the corner buttons and the actions stay usable', async ({
-  page,
-}) => {
-  await openInstalled(page, 'app-update-corners');
-  await publishNewWorker(page);
-  await expect(page.getByTestId('update-notice')).toContainText('A new version is ready.');
-
-  await menuButton(page).click();
-
-  await expect(menu(page)).toBeVisible();
 });

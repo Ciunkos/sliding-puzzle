@@ -3,15 +3,22 @@
 // protocol (the phone project). No expected values are decided here.
 import type { Page } from '@playwright/test';
 import { board, tile } from './app.ts';
-import { expect } from './harness.ts';
+import { expect, test } from './harness.ts';
 
 export interface At {
   x: number;
   y: number;
 }
 
-/** The middle of tile `number` and the size of a cell, in CSS pixels. */
+/**
+ * The middle of tile `number` at rest and the size of a cell, in CSS pixels. A tile that just
+ * moved slides for 300 ms (longer on a slow machine); measured then, a press would land where it is
+ * passing, not on its cell, so its slide is waited out first.
+ */
 export async function tileCentre(page: Page, number: number): Promise<At & { cell: number }> {
+  await expect
+    .poll(() => tile(page, number).evaluate((button) => button.getAnimations().length))
+    .toBe(0);
   const box = await tile(page, number).boundingBox();
   expect(box, `tile ${String(number)} is on screen`).not.toBeNull();
   const width = box?.width ?? 0;
@@ -88,6 +95,37 @@ export async function touchDrag(
   await cdp.detach();
 }
 
+/**
+ * The way the project's player drags: a real finger on a touch screen, the mouse otherwise. Drags
+ * tile `number` by (dx, dy) cells, calls `whileDown` before letting go, and checks that the page
+ * did not scroll on the way.
+ */
+export async function dragTile(
+  page: Page,
+  number: number,
+  cells: { dx: number; dy: number },
+  whileDown: () => Promise<void>,
+): Promise<void> {
+  const from = await tileCentre(page, number);
+  const move = { dx: cells.dx * from.cell, dy: cells.dy * from.cell };
+  if (test.info().project.use.hasTouch === true) await touchDrag(page, from, move, whileDown);
+  else await mouseDrag(page, from, move, whileDown);
+  expect(await scrolled(page), 'the page did not scroll').toEqual({ x: 0, y: 0 });
+}
+
+async function mouseDrag(
+  page: Page,
+  from: At,
+  move: { dx: number; dy: number },
+  whileDown: () => Promise<void>,
+): Promise<void> {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await dragTo(page, from, move.dx, move.dy);
+  await whileDown();
+  await page.mouse.up();
+}
+
 /** How far the page has scrolled, each way, in CSS pixels. */
 export function scrolled(page: Page): Promise<{ x: number; y: number }> {
   return page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
@@ -138,29 +176,7 @@ export async function pull(page: Page, number: number, cells: number): Promise<v
   await page.mouse.up();
 }
 
-/**
- * Counts React commits (renders that reached the page) from the start: React reports each one to
- * the DevTools global hook, which this stands in for. Call before the page loads.
- */
-export async function countRenders(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    Reflect.set(window, 'reactCommits', 0);
-    Reflect.set(window, '__REACT_DEVTOOLS_GLOBAL_HOOK__', {
-      supportsFiber: true,
-      renderers: new Map(),
-      inject: () => 1,
-      checkDCE: () => undefined,
-      onScheduleFiberRoot: () => undefined,
-      onCommitFiberUnmount: () => undefined,
-      onPostCommitFiberRoot: () => undefined,
-      onCommitFiberRoot: () => {
-        Reflect.set(window, 'reactCommits', Number(Reflect.get(window, 'reactCommits')) + 1);
-      },
-    });
-  });
-}
-
-/** The number of React commits so far (see countRenders). */
+/** The number of React commits so far (see countComponentRenders). */
 export function renders(page: Page): Promise<number> {
   return page.evaluate(() => Number(Reflect.get(window, 'reactCommits')));
 }
@@ -202,13 +218,14 @@ export async function scheduled(page: Page, wanted: readonly number[]): Promise<
 /**
  * Counts, per component name, how often each rendered in a commit: React flags every fiber it
  * rendered (PerformedWork), and the hook walks the committed tree. Names are those of the dev
- * build the e2e projects run. Call before the page loads; read with `renderedBy`, reset with
- * `resetRendered`.
+ * build the e2e projects run. It counts every commit too (read with `renders`). Call before the
+ * page loads; read with `renderedBy`, reset with `resetRendered`.
  */
 export async function countComponentRenders(page: Page): Promise<void> {
   await page.addInitScript(() => {
     const counts: Record<string, number> = {};
     Reflect.set(window, 'componentRenders', counts);
+    Reflect.set(window, 'reactCommits', 0);
     interface Fiber {
       flags: number;
       type: unknown;
@@ -241,6 +258,7 @@ export async function countComponentRenders(page: Page): Promise<void> {
       onCommitFiberUnmount: () => undefined,
       onPostCommitFiberRoot: () => undefined,
       onCommitFiberRoot: (_id: number, root: { current: Fiber }) => {
+        Reflect.set(window, 'reactCommits', Number(Reflect.get(window, 'reactCommits')) + 1);
         walk(root.current.child);
         previous = seen;
         seen = new WeakSet<Fiber>();

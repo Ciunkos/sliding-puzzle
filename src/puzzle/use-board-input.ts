@@ -1,7 +1,7 @@
 // Event wiring of the board: taps, drags, swipes and keys all end in one `onMove(tile)`, or in
 // `onBlocked(tile)` for a tap or key on an open game that moves nothing. Thin on purpose: it reads
 // the event and asks input.ts what to do. It cannot run under server rendering, so the e2e specs
-// cover it: play.spec (taps, keys, swipes), drag.spec and touch.spec (drags, flicks, releases).
+// cover it: journey.spec (a tap, a drag by touch and by mouse, a key) and moving.spec (the rest).
 import {
   type KeyboardEvent,
   type MouseEvent,
