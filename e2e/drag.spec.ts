@@ -6,11 +6,13 @@ import { board, moves, startKnownGame, tile } from './support/app.ts';
 import {
   AFTER_TILE_11,
   AFTER_TILE_11_THEN_12,
+  AFTER_TILE_14,
   BOTTOM_ROW_PUSHED,
   KNOWN_BOARD,
 } from './support/boards.ts';
 import {
   boardEdge,
+  pull,
   commitBatches,
   dragTo,
   flickDown,
@@ -47,15 +49,46 @@ test('a short slow drag springs back and moves nothing', async ({ page, request 
   await expect(moves(page)).toHaveText('Moves: 0');
 });
 
-test('one long drag along the bottom row pushes two tiles', async ({ page, request }) => {
+test('pressing the far end of the bottom row and pushing moves the whole run', async ({
+  page,
+  request,
+}) => {
+  // 13 is two cells from the gap, with 14 between: a push of 13 moves both, 14 first.
   await startKnownGame(page, request, uniqueNickname());
-  const from = await pressTile(page, 14);
+  const from = await pressTile(page, 13);
 
-  // The first commits after 0.3 of a cell; the second once the first is pushed home, 1.3 cells.
-  await dragTo(page, from, from.cell * 1.5, 0);
+  await dragTo(page, from, from.cell * 0.5, 0);
   await page.mouse.up();
 
   await expect(board(page)).toHaveAttribute('data-board', BOTTOM_ROW_PUSHED);
+  await expect(moves(page)).toHaveText('Moves: 2');
+});
+
+test('pulling the tile next to the gap a cell and a half moves only that tile', async ({
+  page,
+  request,
+}) => {
+  await startKnownGame(page, request, uniqueNickname());
+  const from = await pressTile(page, 14);
+
+  await dragTo(page, from, from.cell * 1.5, 0);
+  await page.mouse.up();
+
+  await expect(board(page)).toHaveAttribute('data-board', AFTER_TILE_14);
+  await expect(moves(page)).toHaveText('Moves: 1');
+});
+
+test('a tile pulled over 1.2 cells and pulled back moves once each way', async ({
+  page,
+  request,
+}) => {
+  await startKnownGame(page, request, uniqueNickname());
+  await pull(page, 14, 1.2);
+  await expect(moves(page)).toHaveText('Moves: 1');
+
+  await pull(page, 14, -1.2);
+
+  await expect(board(page)).toHaveAttribute('data-board', KNOWN_BOARD);
   await expect(moves(page)).toHaveText('Moves: 2');
 });
 

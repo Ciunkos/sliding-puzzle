@@ -7,5 +7,7 @@ export const AFTER_TILE_11 = '1,2,3,4,5,6,7,8,9,10,0,12,13,14,11,15';
 /** AFTER_TILE_11 after tile 12 slid left into the blank. */
 export const AFTER_TILE_11_THEN_12 = '1,2,3,4,5,6,7,8,9,10,12,0,13,14,11,15';
 export const SOLVED_BOARD = '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,0';
+/** KNOWN_BOARD after tile 14 slid right into the blank. */
+export const AFTER_TILE_14 = '1,2,3,4,5,6,7,8,9,10,11,12,13,0,14,15';
 /** KNOWN_BOARD after tiles 14 and then 13 slid right: the bottom row pushed in one drag. */
 export const BOTTOM_ROW_PUSHED = '1,2,3,4,5,6,7,8,9,10,11,12,0,13,14,15';

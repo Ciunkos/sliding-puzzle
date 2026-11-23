@@ -124,3 +124,10 @@ export async function boardEdge(page: Page): Promise<At> {
   expect(box, 'the board is on screen').not.toBeNull();
   return { x: (box?.x ?? 0) + (box?.width ?? 0), y: row.y };
 }
+
+/** Presses tile `number`, drags it `cells` cells sideways (negative: left) slowly, and lets go. */
+export async function pull(page: Page, number: number, cells: number): Promise<void> {
+  const from = await pressTile(page, number);
+  await dragTo(page, from, from.cell * cells, 0);
+  await page.mouse.up();
+}

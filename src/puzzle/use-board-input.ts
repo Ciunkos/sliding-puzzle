@@ -19,6 +19,7 @@ import {
   keyDirection,
   movable,
   type Point,
+  pushStages,
   releaseGesture,
   startGesture,
   type Step,
@@ -143,6 +144,8 @@ function useGestureState(
     const held = step.kind === 'hold' && step.progress > 0 && !still;
     report(held ? { tile: step.tile, progress: step.progress } : undefined);
     if (step.kind === 'commit') onCommit(step.tile, on);
+    if (step.kind === 'push')
+      for (const stage of pushStages(on, step.tiles)) onCommit(stage.tile, stage.on);
   };
   const end = () => {
     unwatch.current();

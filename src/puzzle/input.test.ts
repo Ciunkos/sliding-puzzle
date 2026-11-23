@@ -8,6 +8,7 @@ import {
   expects,
   isTap,
   keyDirection,
+  pushStages,
   movable,
   progressOf,
   releaseGesture,
@@ -229,7 +230,7 @@ function pressed(tile: number) {
 
 describe('startGesture', () => {
   test('a press on a tile next to the gap holds it, with the way it can go', () => {
-    assert.deepEqual(pressed(2).held, { tile: 2, direction: 'right' });
+    assert.deepEqual(pressed(2).held, { tile: 2, direction: 'right', run: [2] });
   });
 
   test('a press on a tile that cannot move, or on the tray, is a swipe', () => {
@@ -286,44 +287,13 @@ describe('stepGesture', () => {
     assert.deepEqual(stepGesture(pressed(2), at(30, 0), CELL).step, { kind: 'commit', tile: 2 });
   });
 
-  test('after a commit the next tile that goes the same way is held, from where the first lands', () => {
-    // The first tile lands one cell on from where it was pressed: the next starts moving from there.
+  test('after a held tile commits, the press holds nothing more: the tile behind stays', () => {
     const { gesture } = stepGesture(pressed(2), at(30, 0), CELL);
 
     assert.deepEqual(
-      { board: gesture.board, held: gesture.held, anchor: gesture.anchor },
-      {
-        board: AFTER_2,
-        held: { tile: 1, direction: 'right' },
-        anchor: { x: 300, y: 300, t: 1000 },
-      },
+      { board: gesture.board, held: gesture.held },
+      { board: AFTER_2, held: undefined },
     );
-  });
-
-  test('the next tile waits until the finger has pushed the first one all the way', () => {
-    const first = stepGesture(pressed(2), at(30, 0), CELL);
-
-    assert.deepEqual(stepGesture(first.gesture, at(90, 0), CELL).step, {
-      kind: 'hold',
-      tile: 1,
-      progress: 0,
-    });
-  });
-
-  test('one long drag pushes a whole row, then goes on as a swipe from the end', () => {
-    const first = stepGesture(pressed(2), at(30, 0), CELL);
-    const second = stepGesture(first.gesture, at(130, 0), CELL);
-
-    assert.deepEqual(second.step, { kind: 'commit', tile: 1 });
-    assert.equal(second.gesture.held, undefined);
-  });
-
-  test('at the end of a row the gesture goes on as a swipe from the finger, not back', () => {
-    const first = stepGesture(pressed(2), at(30, 0), CELL);
-    const second = stepGesture(first.gesture, at(130, 0), CELL);
-
-    assert.deepEqual(stepGesture(second.gesture, at(120, 0), CELL).step, { kind: 'idle' });
-    assert.deepEqual(second.gesture.anchor, { x: 330, y: 300, t: 1000 });
   });
 
   test('a swipe from a tile that cannot move commits the tile on that side of the gap', () => {
@@ -430,15 +400,6 @@ describe('dragShift', () => {
 });
 
 describe('stepGesture, more', () => {
-  test('a column is pushed up the same way: the next tile waits one cell above the press', () => {
-    const { gesture } = stepGesture(pressed(3), at(0, -30), CELL);
-
-    assert.deepEqual(
-      { held: gesture.held, anchor: gesture.anchor, commits: gesture.commits },
-      { held: { tile: 6, direction: 'up' }, anchor: { x: 200, y: 200, t: 1000 }, commits: 1 },
-    );
-  });
-
   test('a press that wobbles less than a tap allows is still a tap', () => {
     const { gesture } = stepGesture(pressed(2), at(-3, 4), CELL);
 
@@ -561,5 +522,135 @@ describe('expects', () => {
 
   test('a board changed by anything else (a reset, another tab) is not expected', () => {
     assert.equal(expects(pressed(2), AFTER_2), false);
+  });
+});
+
+/** The board of the recording: a 3x3 whose middle row is 7, 3 and the gap. */
+const RECORDED = grid`
+  1 2 4
+  7 3 _
+  5 6 8
+`;
+/** RECORDED after tile 3 slid right. */
+const RECORDED_AFTER_3 = grid`
+  1 2 4
+  7 _ 3
+  5 6 8
+`;
+/** RECORDED after the row 7 3 was pushed right by one. */
+const RECORDED_ROW_PUSHED = grid`
+  1 2 4
+  _ 7 3
+  5 6 8
+`;
+
+/** A press on `tile` of `board` at the origin. */
+function pressOn(board: readonly number[], tile: number) {
+  const gesture = startGesture(board, false, tile, at(0, 0));
+  assert.ok(gesture);
+  return gesture;
+}
+
+describe('one move per pull', () => {
+  test('pulling the tile next to the gap 1.2 cells towards it moves that tile alone', () => {
+    const s1 = stepGesture(pressOn(RECORDED, 3), at(20, 0), CELL);
+    const s2 = stepGesture(s1.gesture, at(40, 0), CELL);
+    const s3 = stepGesture(s2.gesture, at(80, 0), CELL);
+    const s4 = stepGesture(s3.gesture, at(120, 0), CELL);
+
+    assert.deepEqual(
+      [s1.step, s2.step, s3.step, s4.step],
+      [
+        { kind: 'hold', tile: 3, progress: 0.2 },
+        { kind: 'commit', tile: 3 },
+        { kind: 'idle' },
+        { kind: 'idle' },
+      ],
+    );
+    assert.deepEqual(s4.gesture.board, RECORDED_AFTER_3);
+  });
+
+  test('pulling it 1.5 cells, and on to the far edge, still moves it alone', () => {
+    const s1 = stepGesture(pressOn(RECORDED, 3), at(35, 0), CELL);
+    const s2 = stepGesture(s1.gesture, at(150, 0), CELL);
+    const s3 = stepGesture(s2.gesture, at(400, 0), CELL);
+
+    assert.deepEqual(
+      [s1.step, s2.step, s3.step],
+      [{ kind: 'commit', tile: 3 }, { kind: 'idle' }, { kind: 'idle' }],
+    );
+  });
+
+  test('moving back in the same press after the move moves nothing', () => {
+    const s1 = stepGesture(pressOn(RECORDED, 3), at(40, 0), CELL);
+    const s2 = stepGesture(s1.gesture, at(-90, 0), CELL);
+
+    assert.deepEqual(
+      [s2.step, releaseGesture(s2.gesture, 1000)],
+      [{ kind: 'idle' }, { kind: 'idle' }],
+    );
+  });
+
+  test('a new press on the moved tile, dragged back 1.2 cells, moves it back once', () => {
+    const s1 = stepGesture(pressOn(RECORDED_AFTER_3, 3), at(-40, 0), CELL);
+    const s2 = stepGesture(s1.gesture, at(-120, 0), CELL);
+
+    assert.deepEqual([s1.step, s2.step], [{ kind: 'commit', tile: 3 }, { kind: 'idle' }]);
+    assert.deepEqual(s2.gesture.board, RECORDED);
+  });
+
+  test('however far a held tile is pulled towards the gap, it is one move', () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 30, max: 400 }),
+        fc.integer({ min: 30, max: 400 }),
+        (first, then) =>
+          stepGesture(
+            stepGesture(pressOn(RECORDED, 3), at(first, 0), CELL).gesture,
+            at(first + then, 0),
+            CELL,
+          ).step.kind === 'idle',
+      ),
+    );
+  });
+});
+
+describe('a row pushed from its far end', () => {
+  test('a press on a tile in line with the gap, pushed towards it, moves the whole run at once', () => {
+    const { gesture, step } = stepGesture(pressOn(RECORDED, 7), at(30, 0), CELL);
+
+    assert.deepEqual(step, { kind: 'push', tiles: [3, 7] });
+    assert.deepEqual(gesture.board, RECORDED_ROW_PUSHED);
+  });
+
+  test('before the threshold the run waits, and after the push the press moves nothing more', () => {
+    const before = stepGesture(pressOn(RECORDED, 7), at(20, 0), CELL);
+    const pushed = stepGesture(before.gesture, at(30, 0), CELL);
+
+    assert.deepEqual(
+      [before.step, stepGesture(pushed.gesture, at(130, 0), CELL).step],
+      [{ kind: 'idle' }, { kind: 'idle' }],
+    );
+  });
+
+  test('a tile in line with the gap but swiped another way is a swipe from the press', () => {
+    // Up from 7: the tile below the gap, 8, slides up.
+    assert.deepEqual(stepGesture(pressOn(RECORDED, 7), at(2, -30), CELL).step, {
+      kind: 'commit',
+      tile: 8,
+    });
+  });
+
+  test('a press on a tile not in line with the gap is a plain swipe', () => {
+    assert.equal(pressOn(RECORDED, 1).held, undefined);
+  });
+});
+
+describe('pushStages', () => {
+  test('each tile of a push moves on the board as the ones before it left it', () => {
+    assert.deepEqual(pushStages(RECORDED, [3, 7]), [
+      { tile: 3, on: RECORDED },
+      { tile: 7, on: RECORDED_AFTER_3 },
+    ]);
   });
 });

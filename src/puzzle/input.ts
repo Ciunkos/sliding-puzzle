@@ -1,6 +1,6 @@
 // What a key, a swipe, a drag or a tap asks the board to do. Plain functions; the event wiring is
 // in use-board-input.ts and only reads the event and calls these. Times are passed in (ms).
-import { applyMove, type Board, isSolved, legalMoves, sizeOf } from './rules.ts';
+import { applyMove, type Board, legalMoves, sizeOf } from './rules.ts';
 
 /**
  * Where a tile slides. Convention: a direction names where the TILE goes, so "left" (swiping or
@@ -140,8 +140,12 @@ export interface Gesture {
   /** The board as it is after this gesture's moves so far, and as it was before the last one. */
   board: Board;
   before: Board;
-  /** The tile held and the way it can go; undefined for a swipe (a press off any movable tile). */
-  held: { tile: number; direction: Direction } | undefined;
+  /**
+   * The tile held, the way it can go, and the run it pushes: the tiles from the one next to the
+   * gap up to the held one ([tile] for a tile next to the gap). Undefined for a swipe (a press on
+   * a tile out of line with the gap, or on the tray).
+   */
+  held: { tile: number; direction: Direction; run: readonly number[] } | undefined;
   /** Where the pointer was when the gesture started, or last committed a move. */
   anchor: Point;
   /** The last move, and the moves of the last TRAIL_MS (with the press), for a flick's speed. */
@@ -151,7 +155,7 @@ export interface Gesture {
   start: Point;
   commits: number;
   travelled: boolean;
-  /** The game is won: the gesture moves nothing more. */
+  /** The press has made its move (or won the game): it moves nothing more. */
   done: boolean;
 }
 
@@ -159,6 +163,8 @@ export interface Gesture {
 export type Step =
   | { kind: 'hold'; tile: number; progress: number }
   | { kind: 'commit'; tile: number }
+  /** A row pushed from its far end: these tiles move, in this order, the one next to the gap first. */
+  | { kind: 'push'; tiles: readonly number[] }
   | { kind: 'idle' };
 
 const IDLE: Step = { kind: 'idle' };
@@ -169,6 +175,35 @@ const TRAIL_MS = 150;
 /** The way a movable `tile` slides into the gap, if it is next to it. */
 function directionOf(board: Board, tile: number): Direction | undefined {
   return DIRECTIONS.find((direction) => tileForDirection(board, direction) === tile);
+}
+
+/**
+ * The tiles that slide `direction`, one after the other, until `tile` has: the run from the gap
+ * to it. Undefined when `tile` is not in line with the gap that way.
+ */
+function runOf(board: Board, tile: number, direction: Direction): number[] | undefined {
+  const run: number[] = [];
+  let current: Board | undefined = board;
+  while (current !== undefined) {
+    const next = tileForDirection(current, direction);
+    if (next === undefined) return undefined;
+    run.push(next);
+    if (next === tile) return run;
+    current = applyMove(current, next);
+  }
+  return undefined;
+}
+
+/**
+ * What a press on `tile` holds: the tile and the run between it and the gap, when it is in line
+ * with the gap (next to it, or further along its row or column); else nothing, a swipe.
+ */
+function holdOf(board: Board, tile: number): Gesture['held'] {
+  for (const direction of DIRECTIONS) {
+    const run = runOf(board, tile, direction);
+    if (run !== undefined) return { tile, direction, run };
+  }
+  return undefined;
 }
 
 /** How far a point is from another, along `direction` (negative: away from it). */
@@ -188,10 +223,7 @@ export function startGesture(
   at: Point,
 ): Gesture | undefined {
   if (finished) return undefined;
-  const chosen = movable(board, false, tile);
-  const direction = chosen === undefined ? undefined : directionOf(board, chosen);
-  const held =
-    chosen === undefined || direction === undefined ? undefined : { tile: chosen, direction };
+  const held = tile === undefined ? undefined : holdOf(board, tile);
   const trail = [at];
   return {
     board,
@@ -221,42 +253,28 @@ export function progressOf(direction: Direction, dx: number, dy: number, cellPx:
 }
 
 /**
- * After a tile moved, with the pointer at `at` on cells `cellPx` wide: the board after the move,
- * and the gesture re-anchored where that tile lands (one cell on from the anchor, in its
- * direction). From there it holds the tile that goes the same way now (the next one of the row,
- * which the finger pushes on). With none left that way it is a swipe from the finger, which may
- * move a tile another way. The winning move ends it: nothing is held or moved after.
- * So the next tile starts to move only once the finger has pushed the first one all the way, as a
- * row of real blocks would, and a short swipe moves one tile, however small the cells.
+ * After a move (`tiles`, the one next to the gap first): the board after it, and the press spent.
+ * One move per press: pulling a tile on past the gap never drags the tile behind it, and going
+ * back in the same press moves nothing (a new press moves it back). A row is one move of its run.
  */
-function committed(
-  gesture: Gesture,
-  move: { tile: number; direction: Direction },
-  at: Point,
-  cellPx: number,
-) {
-  const { tile, direction } = move;
-  const board = applyMove(gesture.board, tile) ?? gesture.board;
-  const done = isSolved(board);
-  const next = done ? undefined : tileForDirection(board, direction);
-  const held = next === undefined ? undefined : { tile: next, direction };
-  const unit = UNIT[direction];
-  const { x, y } = gesture.anchor;
-  // A swipe from where it lands could start behind the finger and read as a swipe back.
-  const anchor =
-    held === undefined ? at : { x: x + unit.x * cellPx, y: y + unit.y * cellPx, t: at.t };
-  const commits = gesture.commits + 1;
-  const step: Step = { kind: 'commit', tile };
+function committed(gesture: Gesture, tiles: readonly number[]) {
+  const board = tiles.reduce((current, tile) => applyMove(current, tile) ?? current, gesture.board);
+  const [first] = tiles;
+  const step: Step =
+    tiles.length === 1 && first !== undefined
+      ? { kind: 'commit', tile: first }
+      : { kind: 'push', tiles };
+  const commits = gesture.commits + tiles.length;
   const before = gesture.board;
-  return { gesture: { ...gesture, board, before, held, anchor, commits, done }, step };
+  return { gesture: { ...gesture, board, before, held: undefined, commits, done: true }, step };
 }
 
 /** A swipe: commits the tile on the swiped side of the gap once the swipe is long enough. */
-function swipeStep(gesture: Gesture, at: Point, cellPx: number) {
+function swipeStep(gesture: Gesture, at: Point) {
   const direction = swipeDirection(at.x - gesture.anchor.x, at.y - gesture.anchor.y);
   const tile = direction === undefined ? undefined : tileForDirection(gesture.board, direction);
   if (direction === undefined || tile === undefined) return { gesture, step: IDLE };
-  return committed(gesture, { tile, direction }, at, cellPx);
+  return committed(gesture, [tile]);
 }
 
 /**
@@ -292,11 +310,12 @@ export function stepGesture(
   if (moved.done) return { gesture: moved, step: IDLE };
   const { held } = moved;
   if (held === undefined || swipedAway(moved, at))
-    return swipeStep({ ...moved, held: undefined }, at, cellPx);
+    return swipeStep({ ...moved, held: undefined }, at);
   const progress = progressOf(held.direction, at.x - moved.anchor.x, at.y - moved.anchor.y, cellPx);
-  if (progress < COMMIT_SHARE)
-    return { gesture: moved, step: { kind: 'hold', tile: held.tile, progress } };
-  return committed(moved, held, at, cellPx);
+  if (progress >= COMMIT_SHARE) return committed(moved, held.run);
+  // A run pushed from its far end does not follow the finger; it moves at the threshold.
+  const step: Step = held.run.length === 1 ? { kind: 'hold', tile: held.tile, progress } : IDLE;
+  return { gesture: moved, step };
 }
 
 /** The speed of the last moves along `direction`, px per ms, over about FLICK_SPAN_MS. */
@@ -314,7 +333,7 @@ function speedOf(direction: Direction, gesture: Gesture): number {
  */
 export function releaseGesture(gesture: Gesture, now: number): Step {
   const { held, last } = gesture;
-  if (held === undefined || gesture.done) return IDLE;
+  if (held?.run.length !== 1 || gesture.done) return IDLE;
   const flicked =
     along(held.direction, gesture.anchor, last) >= FLICK_MIN_PX &&
     speedOf(held.direction, gesture) >= FLICK_PX_PER_MS &&
@@ -337,4 +356,15 @@ export function dragShift(
   if (drag === undefined || direction === undefined) return undefined;
   const unit = UNIT[direction];
   return { col: unit.x * drag.progress, row: unit.y * drag.progress };
+}
+
+/** The tiles of a push, each with the board it moves on (as the ones before it left it). */
+export function pushStages(board: Board, tiles: readonly number[]): { tile: number; on: Board }[] {
+  const stages: { tile: number; on: Board }[] = [];
+  let current = board;
+  for (const tile of tiles) {
+    stages.push({ tile, on: current });
+    current = applyMove(current, tile) ?? current;
+  }
+  return stages;
 }
