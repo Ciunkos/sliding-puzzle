@@ -139,6 +139,26 @@ async function finishedButNeverArrived() {
   return { device, driver };
 }
 
+/** A first load that failed, then its retry under way with the server's answer held back. */
+async function loadAnsweredLate() {
+  const device = await adaDevice(5);
+  device.world.reachable = false;
+  const driver = driverOn(device);
+  await driver.load();
+  device.world.reachable = true;
+  device.world.holding = { method: 'PUT', suffix: '/tally' };
+  return { device, driver, late: driver.load() };
+}
+
+/** Starts a new game with the network's held answers still waiting, then lets them through. */
+async function newGameWhileHeld(device: Device, driver: ReturnType<typeof driverOn>) {
+  await new Promise((resolve) => setImmediate(resolve));
+  device.world.holding = undefined;
+  device.world.serverNow = new Date('2026-01-01T00:10:00.000Z');
+  await driver.start();
+  await device.releaseHeld();
+}
+
 describe('the session driver', () => {
   test('loading resumes the game from the server and shows it, no longer busy', async () => {
     const { driver } = await loaded(5);
@@ -375,11 +395,48 @@ describe('the session driver', () => {
     assert.partialDeepStrictEqual(driver.shown(), { game: { moves: 0, version: 3 }, busy: false });
   });
 
+  test('a load answered late, after a new game started meanwhile, leaves the new game', async () => {
+    // Given a first load that failed, and its retry whose answer is held back
+    const { device, driver, late } = await loadAnsweredLate();
+
+    // When a new game starts at 10 min and is answered, and only then the load's answer arrives
+    await newGameWhileHeld(device, driver);
+    await late;
+
+    // Then the new game, started at 10 min on the server, is the one on screen
+    assert.partialDeepStrictEqual(driver.shown(), {
+      game: { startedAt: '2026-01-01T00:10:00.000Z' },
+    });
+  });
+
+  test('taps while a retry waits are sent by that retry, not each at once', async () => {
+    const { device, driver } = await loaded(5);
+    device.world.reachable = false;
+    await driver.move(ONE);
+    device.world.requests.length = 0;
+
+    await driver.move(ONE);
+    await driver.move(ONE);
+
+    assert.deepEqual([device.world.requests, device.world.delays], [[], [1000]]);
+  });
+
   test('a shown tab sends what waits', async () => {
     const { device, driver } = await loaded(5);
     device.world.online = false;
     await driver.move(TWO);
     device.world.online = true;
+
+    await driver.visibility(true);
+
+    assert.partialDeepStrictEqual(await device.stored(), { moves: 1 });
+  });
+
+  test('a tab shown while a retry waits sends at once', async () => {
+    const { device, driver } = await loaded(5);
+    device.world.reachable = false;
+    await driver.move(TWO);
+    device.world.reachable = true;
 
     await driver.visibility(true);
 

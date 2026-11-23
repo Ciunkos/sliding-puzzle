@@ -94,7 +94,9 @@ export function loadQueues<State, Move>(
 
 /**
  * Keeps the queue of `state` in its own record, replacing `previousKey` (the record this tab
- * saved before), or forgets it when nothing is pending. Returns the record's key, if any.
+ * saved before), or forgets it when nothing is pending. Returns the record's key, if any. The new
+ * record is written before the old one goes: when storage is full, the old one is kept (and its
+ * key returned) rather than both lost.
  */
 export function saveQueue<State, Move>(
   gameId: string,
@@ -109,12 +111,12 @@ export function saveQueue<State, Move>(
       ? undefined
       : queuePrefix(gameId, nickname) + batchIdFor(confirmed.version, [pending, inFlight ?? null]);
   try {
-    if (previousKey !== undefined && previousKey !== key) storage.removeItem(previousKey);
     if (key !== undefined) storage.setItem(key, JSON.stringify({ confirmed, pending, inFlight }));
+    if (previousKey !== undefined && previousKey !== key) storage.removeItem(previousKey);
     return key;
   } catch {
     // Storage is a convenience: a failed write must not break the game.
-    return undefined;
+    return previousKey;
   }
 }
 

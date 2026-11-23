@@ -11,11 +11,16 @@ export type SendOutcome<State, Move> =
   | Extract<SyncEvent<State, Move>, { type: 'acknowledged' | 'rejected' | 'network-failed' }>
   | { type: 'refused' };
 
-/** Answers that a later retry may turn into success: unreachable, timed out, busy, server errors. */
+/**
+ * Answers that a later retry may turn into success: unreachable, timed out, busy, server errors,
+ * and a 2xx that is not a game (a portal's login page, a proxy's): it says nothing about whether
+ * the server took the batch.
+ */
 function retriable(failure: unknown): boolean {
   if (!(failure instanceof GameApiError)) return true;
   const { status } = failure;
-  return status === 0 || status === 408 || status === 429 || status >= 500;
+  const unreadable = status >= 200 && status < 300;
+  return status === 0 || unreadable || status === 408 || status === 429 || status >= 500;
 }
 
 /** The event for a failed send: the server's game wins, a retry later, or a refusal for good. */

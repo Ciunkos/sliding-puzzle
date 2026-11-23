@@ -71,6 +71,8 @@ export class SessionDriver<State, Move, Options> {
   private sync: SyncState<State, Move> | undefined;
   /** The storage record of this tab's queue, if it has one. */
   private ownKey: string | undefined;
+  /** How many new games and resets the server has answered: a load started before one is stale. */
+  private replacements = 0;
   private connected = false;
   private loading = false;
   /** A new game or a reset is running. */
@@ -119,12 +121,14 @@ export class SessionDriver<State, Move, Options> {
   async load(): Promise<void> {
     if (this.loading || this.disposed) return;
     this.loading = true;
+    const replacements = this.replacements;
     // A browser that knows it is offline is not asked to fail a request (and log it).
     const answer = this.env.isOnline()
       ? await settle(this.api.resume(this.nickname, this.options))
       : UNREACHABLE;
     this.loading = false;
-    if (!this.live) return;
+    // A new game or a reset answered meanwhile is newer than this answer: it stays.
+    if (!this.live || this.replacements !== replacements) return;
     if (!answer.ok) {
       this.loadFailed(answer.error);
       return;
@@ -161,15 +165,17 @@ export class SessionDriver<State, Move, Options> {
   /** The connection is back: load or send now, without waiting for the backoff. */
   async online(): Promise<void> {
     this.retries = 0;
-    this.cancelRetry?.();
-    this.cancelRetry = undefined;
+    this.clearRetry();
     await this.reconnect();
   }
 
   /** The tab was hidden or shown: hidden time is not play time, and a shown tab sends. */
   async visibility(visible: boolean): Promise<void> {
     this.tickClock(visible ? 'show' : 'hide');
-    if (visible) await this.reconnect();
+    if (!visible) return;
+    // Coming back is a reason to try now, like the connection coming back.
+    this.clearRetry();
+    await this.reconnect();
   }
 
   elapsedMs(now: number): number {
@@ -213,6 +219,8 @@ export class SessionDriver<State, Move, Options> {
       if (sync.pending.length > 0) this.apply({ type: 'network-failed' });
       return undefined;
     }
+    // After a failure the retry is scheduled: taps meanwhile wait for it, not one request each.
+    if (this.cancelRetry !== undefined) return undefined;
     return startRound(this.api.definition, sync, this.elapsedMs(this.env.now()));
   }
 
@@ -251,6 +259,12 @@ export class SessionDriver<State, Move, Options> {
     this.emit();
   }
 
+  /** The server answered: a retry waiting for it is no longer needed. */
+  private clearRetry(): void {
+    this.cancelRetry?.();
+    this.cancelRetry = undefined;
+  }
+
   private retryLater(): void {
     this.retries += 1;
     this.cancelRetry?.();
@@ -268,6 +282,7 @@ export class SessionDriver<State, Move, Options> {
     this.ownKey = undefined;
     this.connected = true;
     this.retries = 0;
+    this.clearRetry();
     this.message = undefined;
     this.busy = false;
     this.clock ??= this.storedClock();
@@ -354,6 +369,8 @@ export class SessionDriver<State, Move, Options> {
   }
 
   private replaced(game: SavedGame<State>): void {
+    this.replacements += 1;
+    this.clearRetry();
     this.connected = true;
     this.setClock({ startedAt: game.startedAt, clock: newClock(this.env.isVisible()) });
     this.save({ confirmed: game, pending: [] });

@@ -39,6 +39,21 @@ const STORED_CLOCK = {
   clock: { banked: 5, since: 7, started: true, stopped: false, visible: true, lastAt: 9 },
 };
 
+/** `storage` as it is when full: every write throws, as a browser's QuotaExceededError does. */
+function full(storage: ReturnType<typeof memoryStorage>) {
+  return {
+    getItem: (key: string) => storage.getItem(key),
+    removeItem: (key: string) => {
+      storage.removeItem(key);
+    },
+    key: (index: number) => storage.key(index),
+    length: storage.length,
+    setItem: (): never => {
+      throw new Error('QuotaExceededError');
+    },
+  };
+}
+
 /** Storage holding one record per queue, keyed in the order given. */
 function storageWith(first: object, second?: object, third?: object) {
   return memoryStorage({
@@ -74,6 +89,15 @@ describe('the stored move queues', () => {
     saveQueue('tally', 'Ada', QUEUE, storage, before);
 
     assert.partialDeepStrictEqual(loadQueues(tallyGame, 'Ada', storage), [{ queue: QUEUE }]);
+  });
+
+  test('when storage is full, the record saved before is kept, not lost', () => {
+    const storage = memoryStorage({});
+    const before = saveQueue('tally', 'Ada', OTHER_TAB, storage);
+
+    saveQueue('tally', 'Ada', QUEUE, full(storage), before);
+
+    assert.partialDeepStrictEqual(loadQueues(tallyGame, 'Ada', storage), [{ queue: OTHER_TAB }]);
   });
 
   test('a queue with nothing pending is forgotten and gets no record', () => {

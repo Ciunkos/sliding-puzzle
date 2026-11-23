@@ -28,6 +28,10 @@ export interface World {
   hanging: string | undefined;
   /** Requests to URLs ending so are answered with this HTTP status by a broken server. */
   broken: { suffix: string; status: number } | undefined;
+  /** Requests by this method to URLs ending so reach the server, but their answers wait for releaseHeld. */
+  holding: { method: string; suffix: string } | undefined;
+  /** The answers held back so far, released in order by releaseHeld. */
+  held: (() => void)[];
   /** What navigator.onLine would say. */
   online: boolean;
   serverNow: Date;
@@ -53,6 +57,8 @@ export interface Device {
   runTimers: () => Promise<void>;
   /** The keys of the move queues kept in storage. */
   queued: () => string[];
+  /** Lets every held answer through, and waits until what they started has settled. */
+  releaseHeld: () => Promise<void>;
 }
 
 function environmentOf(world: World) {
@@ -101,6 +107,20 @@ function brokenAnswer(world: World, url: string): Response | undefined {
   return Response.json({ error: 'broken' }, { status: world.broken.status });
 }
 
+/** Whether the answer to this request is held back (world.holding). */
+function isHeld(world: World, url: string, init: RequestInit | undefined): boolean {
+  const holding = world.holding;
+  return holding !== undefined && init?.method === holding.method && url.endsWith(holding.suffix);
+}
+
+/** The server's answer to a request that reached it: lost or held back as `world` says. */
+async function serverAnswer(world: World, app: Hono, url: string, init: RequestInit | undefined) {
+  const answer = await app.request(url, init);
+  if (endsWith(url, world.losingAnswers)) throw new TypeError('the answer was lost');
+  if (isHeld(world, url, init)) await new Promise<void>((resolve) => world.held.push(resolve));
+  return answer;
+}
+
 /** The network between the device and `app`, doing to each request what `world` says. */
 function networkOver(world: World, app: Hono): typeof fetch {
   return async (input, init) => {
@@ -110,9 +130,7 @@ function networkOver(world: World, app: Hono): typeof fetch {
     if (endsWith(url, world.hanging)) return hang(init?.signal);
     const broken = brokenAnswer(world, url);
     if (broken !== undefined) return broken;
-    const answer = await app.request(url, init);
-    if (endsWith(url, world.losingAnswers)) throw new TypeError('the answer was lost');
-    return answer;
+    return serverAnswer(world, app, url, init);
   };
 }
 
@@ -123,6 +141,8 @@ function newWorld(): World {
     losingAnswers: undefined,
     hanging: undefined,
     broken: undefined,
+    holding: undefined,
+    held: [],
     online: true,
     serverNow: new Date('2026-01-01T00:00:00.000Z'),
     deviceNow: 0,
@@ -154,6 +174,10 @@ export async function adaDevice(target: number): Promise<Device> {
       return body;
     },
     queued: () => [...world.storage.keys()].filter((key) => key.startsWith('game-queue:')),
+    releaseHeld: async () => {
+      for (const release of world.held.splice(0)) release();
+      await new Promise((resolve) => setImmediate(resolve));
+    },
     runTimers: async () => {
       for (const run of world.timers.splice(0)) run();
       // The routes run on in-memory SQLite: everything they start settles before the next macrotask.

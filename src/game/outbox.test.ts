@@ -56,6 +56,15 @@ describe('sending a batch', () => {
     assert.deepEqual(await sendBatch(missing, 'Ada', REQUEST), { type: 'refused' });
   });
 
+  test('a 200 answer that is not a game, such as a portal login page, is retried later', async () => {
+    // It says nothing about whether the server took the batch, so the batch is kept.
+    const portal = answering(() =>
+      Promise.resolve(new Response('<html>Sign in to the Wi-Fi</html>', { status: 200 })),
+    );
+
+    assert.deepEqual(await sendBatch(portal, 'Ada', REQUEST), { type: 'network-failed' });
+  });
+
   test('a request timeout and too many requests are retried later', async () => {
     const slow = answering(() => Promise.resolve(new Response('', { status: 408 })));
     const busy = answering(() => Promise.resolve(new Response('', { status: 429 })));
