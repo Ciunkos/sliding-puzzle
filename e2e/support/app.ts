@@ -1,5 +1,5 @@
 // Steps and locators of the app under test. No expected values are decided here.
-import type { APIRequestContext, Locator, Page } from '@playwright/test';
+import type { APIRequestContext, BrowserContext, Locator, Page } from '@playwright/test';
 import { expect } from './harness.ts';
 import { openMenu } from './menu.ts';
 
@@ -106,4 +106,26 @@ export async function clickAndSave(page: Page, target: Locator): Promise<void> {
     ),
     target.click(),
   ]);
+}
+
+/**
+ * How many moves of `nickname` wait in this browser's storage, as the browser itself holds it: read
+ * from a page of the same origin that runs no app code (the API's health answer), so nothing reads
+ * the queue on the way. A tab's storage writes reach the browser a moment after the tab makes them,
+ * so a test that closes a tab waits for this before opening the profile again.
+ */
+export async function storedMoves(context: BrowserContext, nickname: string): Promise<number> {
+  const peek = await context.newPage();
+  // A page that is not the app asks for the site's icon; there is none, so answer it here.
+  await peek.route('**/favicon.ico', (route) => route.fulfill({ status: 204 }));
+  await peek.goto('/sliding-puzzle/api/health');
+  const count = await peek.evaluate((prefix) => {
+    const queues = Object.keys(localStorage).filter((key) => key.startsWith(prefix));
+    return queues.reduce((sum, key) => {
+      const queue = JSON.parse(localStorage.getItem(key) ?? '{}') as { pending?: unknown[] };
+      return sum + (queue.pending?.length ?? 0);
+    }, 0);
+  }, `game-queue:sliding-puzzle:${nickname}:`);
+  await peek.close();
+  return count;
 }

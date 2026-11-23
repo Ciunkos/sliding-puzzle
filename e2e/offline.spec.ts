@@ -8,6 +8,7 @@ import {
   openProfile,
   openProfileUntilMoves,
   startKnownGame,
+  storedMoves,
   tile,
 } from './support/app.ts';
 import { AFTER_TILE_11, AFTER_TILE_11_THEN_12 } from './support/boards.ts';
@@ -28,9 +29,15 @@ async function tapWhileOffline(page: Page, context: BrowserContext): Promise<voi
   await page.close();
 }
 
-/** Back online, the profile opens in a new tab of the same browser and sends the stored move. */
+/**
+ * Back online, once the browser holds the closed tab's move in its storage, the profile opens in a
+ * new tab of the same browser and shows the stored move.
+ */
 async function reopenOnline(context: BrowserContext, nickname: string): Promise<void> {
   await context.setOffline(false);
+  await expect
+    .poll(() => storedMoves(context, nickname), { message: 'the offline move is stored' })
+    .toBeGreaterThan(0);
   const again = await context.newPage();
   await openProfile(again, nickname);
   await expect(board(again)).toHaveAttribute('data-board', AFTER_TILE_11);
