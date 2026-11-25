@@ -21,7 +21,7 @@
     "test:e2e": "playwright test",
     "test:e2e:nogpu": "E2E_SOFTWARE_GL=1 playwright test",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit && node node_modules/typescript7/bin/tsc --noEmit",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "worker:dev": "wrangler dev",
@@ -58,6 +58,7 @@
     "prettier": "^3.10.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.73.0",
+    "typescript7": "npm:typescript@7.0.2",
     "vite": "^8.3.8",
     "wrangler": "^4.164.0"
   }
