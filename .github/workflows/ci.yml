@@ -43,7 +43,7 @@ jobs:
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          changed=$(git diff --name-only "$BASE...HEAD" -- eslint.config.js eslint.test-standard.js stryker.config.json .githooks .github gates scripts)
+          changed=$(git diff --name-only "$BASE...HEAD" -- oxlint.config.ts lint stryker.config.json .githooks .github gates scripts)
           if [ -n "$changed" ]; then
             echo "These files define the quality gates. Changing them needs the 'gates-change' label and a human review:"
             echo "$changed"

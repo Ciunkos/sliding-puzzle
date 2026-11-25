@@ -1,7 +1,7 @@
 # src/test-support
 
 Shared helpers for unit tests. Test files import them as `../test-support/<file>.ts` (the test
-standard allows exactly that). Production code must never import from here (ESLint blocks it).
+standard allows exactly that). Production code must never import from here (lint blocks it).
 
 ## What is here
 

@@ -1,20 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ESLint } from 'eslint';
-import tseslint from 'typescript-eslint';
+import { lintSnippet, text } from './oxlint.ts';
 
 async function lint(filePath: string, code: string) {
-  // Snippets use virtual file paths, so lint them without type information.
-  const eslint = new ESLint({
-    overrideConfig: [
-      { languageOptions: { parserOptions: { projectService: false } } },
-      tseslint.configs.disableTypeChecked,
-    ],
-  });
-  const [result] = await eslint.lintText(code, { filePath });
-  return (result?.messages ?? []).filter(
-    (m) => m.ruleId?.endsWith('no-restricted-imports') === true,
-  );
+  // Snippets live in a throwaway project laid out like this one, so lint them without type information.
+  const diagnostics = await lintSnippet(filePath, code, 'full');
+  return diagnostics
+    .filter((d) => d.code?.endsWith('no-restricted-imports)') === true)
+    .map((d) => ({ ...d, message: text(d) }));
 }
 
 const cases: [string, string, boolean][] = [

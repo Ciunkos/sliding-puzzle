@@ -1,23 +1,24 @@
 // @ts-check
 /**
- * TEST STANDARD (lint-enforced). Tested in src/test-standard.test.ts.
+ * TEST STANDARD (lint-enforced). Tested in gates/test-standard.test.ts and lint/rules.test.js.
  *
- * Exports three flat-config arrays (not wired into eslint.config.js yet):
- *   testStandard     - src/**\/*.test.{ts,tsx}
+ * An oxlint JS plugin, `test-standard`, and three override lists that oxlint.config.ts wires in:
+ *   testStandard     - src/**\/*.test.{ts,tsx} and src/test-support/**\/*.contract.ts
  *   e2eStandard      - e2e/**\/*.spec.ts
  *   productionLimits - every other src/**\/*.{ts,tsx}
  *
- * Every message says how to fix the problem. Core and import-x rules have fixed messages, so they are
- * re-exported through `wrap()` below, which appends a fix hint. Rule ids live in the `test-standard`
- * plugin so the project's core `no-restricted-imports` boundary rules are never overridden.
+ * Every message says how to fix the problem. The ported ESLint core rules (./eslint-core.js) and
+ * import order (./import-order.js) have fixed messages, so they are registered through `withHint()`
+ * below, which appends a fix hint. Rule ids live in the `test-standard` plugin, so they never clash
+ * with the boundary rules in ./boundaries.js or with oxlint's native rules.
  */
 import path from 'node:path';
-import { builtinRules } from 'eslint/use-at-your-own-risk';
-import importX from 'eslint-plugin-import-x';
+import { fileURLToPath } from 'node:url';
+import { complexity, maxDepth, maxLinesPerFunction, maxNestedCallbacks } from './eslint-core.js';
+import { importOrder } from './import-order.js';
 
-/** @typedef {import('eslint').Rule.RuleModule} RuleModule */
-/** @typedef {import('eslint').Rule.Node} Node */
-/** @typedef {import('eslint').Linter.Config} Config */
+/** Absolute path of this plugin, for `jsPlugins` in a config that lives anywhere. */
+export const PLUGIN_PATH = fileURLToPath(import.meta.url);
 
 // ---------------------------------------------------------------------------------------------
 // Numbers (the owner's limits; tests prove each one)
@@ -36,37 +37,20 @@ const PROD_LIMITS = { complexity: 8, maxDepth: 3, maxLinesPerFunction: 40 };
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Re-exports `rule` with `hint` appended to every message it reports.
- * @param {RuleModule} rule
+ * Returns `rule` with `hint` appended to every message it reports.
+ * @param {any} rule
  * @param {string} hint
- * @returns {RuleModule}
  */
-function wrap(rule, hint) {
-  const messages = rule.meta?.messages ?? {};
-  return {
-    meta: rule.meta,
-    create(context) {
-      /** @param {import('eslint').Rule.ReportDescriptor & { data?: Record<string, unknown> }} d */
-      const report = (d) => {
-        const { messageId, data, ...rest } = /** @type {any} */ (d);
-        /** @type {string} */
-        const template = messageId ? (messages[messageId] ?? messageId) : rest.message;
-        const text = template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, key) =>
-          String(data?.[key] ?? ''),
-        );
-        const stop = /[.!?]$/.test(text) ? '' : '.';
-        context.report({ ...rest, message: `${text}${stop} ${hint}` });
-      };
-      return rule.create(Object.create(context, { report: { value: report } }));
-    },
-  };
-}
-
-/** @param {string} name */
-function coreRule(name) {
-  const rule = builtinRules.get(name);
-  if (!rule) throw new Error(`ESLint core rule ${name} not found`);
-  return rule;
+function withHint(rule, hint) {
+  /** @type {Record<string, string>} */
+  const messages = {};
+  for (const [id, text] of Object.entries(
+    /** @type {Record<string, string>} */ (rule.meta.messages),
+  )) {
+    const stop = /[.!?]$/.test(text) ? '' : '.';
+    messages[id] = `${text}${stop} ${hint}`;
+  }
+  return { ...rule, meta: { ...rule.meta, messages } };
 }
 
 /**
@@ -115,7 +99,6 @@ function wrapsOnlyDescribe(fn) {
   );
 }
 
-/** @type {RuleModule} */
 const testShape = {
   meta: {
     type: 'suggestion',
@@ -278,7 +261,6 @@ function insideProperty(ancestors) {
   });
 }
 
-/** @type {RuleModule} */
 const literalExpected = {
   meta: {
     type: 'suggestion',
@@ -340,7 +322,6 @@ const TEST_SUPPORT = /^\.\.\/test-support\/[\w.-]+\.ts$/;
 const OTHER_PUBLIC_ENTRY = /^\.\.\/[\w-]+\/(index\.ts|server\.ts|client\.tsx)$/;
 const E2E_PACKAGES = new Set(['@playwright/test', '@axe-core/playwright']);
 
-/** @type {RuleModule} */
 const allowedImports = {
   meta: {
     type: 'problem',
@@ -407,49 +388,138 @@ const allowedImports = {
   },
 };
 
+/** ESLint's no-restricted-syntax (lib/rules/no-restricted-syntax.js, MIT, see ./eslint-core.js). */
+const restrictedSyntax = {
+  meta: {
+    type: 'suggestion',
+    schema: {
+      type: 'array',
+      items: {
+        oneOf: [
+          { type: 'string' },
+          {
+            type: 'object',
+            properties: { selector: { type: 'string' }, message: { type: 'string' } },
+            required: ['selector'],
+            additionalProperties: false,
+          },
+        ],
+      },
+      uniqueItems: true,
+      minItems: 0,
+    },
+    messages: { restrictedSyntax: '{{message}}' },
+  },
+  /** @param {any} context */
+  create(context) {
+    /** @type {Record<string, (node: any) => void>} */
+    const visitors = {};
+    for (const option of /** @type {(string | { selector: string, message?: string })[]} */ (
+      context.options
+    )) {
+      const selector = typeof option === 'string' ? option : option.selector;
+      const message =
+        typeof option !== 'string' && option.message
+          ? option.message
+          : `Using '${selector}' is not allowed.`;
+      visitors[selector] = (node) =>
+        context.report({ node, messageId: 'restrictedSyntax', data: { message } });
+    }
+    return visitors;
+  },
+};
+
+/**
+ * Inline configuration is switched off in tests (ESLint's `noInlineConfig`). oxlint has no such
+ * option and honours `oxlint-disable` and `eslint-disable` comments, so every directive comment in a
+ * test file is an error: a test cannot switch a rule off.
+ *
+ * A directive can hide the report about itself: one without a rule list hides every rule, and one
+ * that names this rule hides this rule. For those two, the rule also throws, after every visitor
+ * has run. oxlint turns a thrown error into an error of its own that no comment can hide (the file's
+ * other plugin reports are lost with it, and come back once the comment is removed).
+ */
+const DIRECTIVE =
+  /^\s*(?:(?:eslint|oxlint)(?:-disable(?:-next-line|-line)?|-enable|-env)?|globals?|exported)(?:\s|$)/;
+const DISABLE = /^\s*(?:eslint|oxlint)-disable(?:-next-line|-line)?(?:\s|$)/;
+const noInlineConfig = {
+  meta: {
+    type: 'problem',
+    schema: [],
+    messages: {
+      locked:
+        'Lint comments are switched off in tests: remove the `{{directive}}` comment and fix the code it would hide.',
+    },
+  },
+  /** @param {any} context */
+  create(context) {
+    /** @type {string[]} */
+    const unhideable = [];
+    return {
+      Program() {
+        for (const comment of context.sourceCode.getAllComments()) {
+          if (!DIRECTIVE.test(comment.value)) continue;
+          const [directive = '', ...rest] = comment.value.trim().split(/\s+/);
+          context.report({ loc: comment.loc, messageId: 'locked', data: { directive } });
+          const rules = rest.join(' ').split('--')[0].trim();
+          if (DISABLE.test(comment.value) && (rules === '' || rules.includes('no-inline-config'))) {
+            unhideable.push(`line ${String(comment.loc.start.line)}: \`${directive}\``);
+          }
+        }
+      },
+      'Program:exit'() {
+        if (unhideable.length === 0) return;
+        const error = new Error(
+          `Lint comments are switched off in tests (${unhideable.join(', ')}): remove the comment and fix the code it would hide.`,
+        );
+        error.stack = error.message;
+        throw error;
+      },
+    };
+  },
+};
+
 // ---------------------------------------------------------------------------------------------
 // Plugin
 // ---------------------------------------------------------------------------------------------
 const STRAIGHT_LINE =
   'Tests must be straight-line code: remove if, ?:, &&, ||, ??, ?. and default values; narrow with assert.ok(x) and split cases into separate tests or a fast-check property.';
 
-const plugin = {
+export default {
   meta: { name: 'test-standard' },
   rules: {
     'allowed-imports': allowedImports,
     'literal-expected': literalExpected,
     'test-shape': testShape,
-    'test-complexity': wrap(coreRule('complexity'), STRAIGHT_LINE),
-    'test-max-depth': wrap(coreRule('max-depth'), STRAIGHT_LINE),
-    'test-max-nested-callbacks': wrap(
-      coreRule('max-nested-callbacks'),
+    'no-restricted-syntax': restrictedSyntax,
+    'no-inline-config': noInlineConfig,
+    'test-complexity': withHint(complexity, STRAIGHT_LINE),
+    'test-max-depth': withHint(maxDepth, STRAIGHT_LINE),
+    'test-max-nested-callbacks': withHint(
+      maxNestedCallbacks,
       'Nest at most describe > test > fc.property: move inner callbacks into named helpers in ../test-support/.',
     ),
-    complexity: wrap(
-      coreRule('complexity'),
+    complexity: withHint(
+      complexity,
       'Split the function into smaller named functions, or replace branches with a lookup table or guard clauses.',
     ),
-    'max-depth': wrap(
-      coreRule('max-depth'),
+    'max-depth': withHint(
+      maxDepth,
       'Flatten the nesting with guard clauses (early return/continue) or extract the inner block into a named function.',
     ),
-    'max-lines-per-function': wrap(
-      coreRule('max-lines-per-function'),
+    'max-lines-per-function': withHint(
+      maxLinesPerFunction,
       'Extract cohesive parts into named helper functions so each function fits on one screen.',
     ),
-    'no-cycle': wrap(
-      /** @type {any} */ (importX.rules['no-cycle']),
-      'Break the cycle: move the shared code into a third file that both import, or invert the dependency.',
-    ),
-    'import-order': wrap(
-      /** @type {any} */ (importX.rules.order),
-      'Order imports as builtin (node:*), packages, ../parent, ./sibling, each group alphabetized; run eslint --fix.',
+    'import-order': withHint(
+      importOrder,
+      'Order imports as builtin (node:*), packages, ../parent, ./sibling, each group alphabetized; run oxlint --fix.',
     ),
   },
 };
 
 // ---------------------------------------------------------------------------------------------
-// Banned syntax in tests (ONE array per file set: a later no-restricted-syntax block would replace it)
+// Banned syntax in tests (ONE array per file set: a later override of the same rule replaces it)
 // ---------------------------------------------------------------------------------------------
 const TEST_CALL = 'CallExpression[callee.name=/^(test|it)$/]';
 const DESCRIBE =
@@ -521,7 +591,8 @@ const TEST_SYNTAX = [
 
 /** @param {'assert' | 'expect'} assertion */
 const testRules = (assertion) => ({
-  'no-restricted-syntax': ['error', ...TEST_SYNTAX],
+  'test-standard/no-restricted-syntax': ['error', ...TEST_SYNTAX],
+  'test-standard/no-inline-config': 'error',
   'test-standard/test-complexity': ['error', 1],
   'test-standard/test-max-depth': ['error', TEST_LIMITS.maxDepth],
   'test-standard/test-max-nested-callbacks': ['error', TEST_LIMITS.maxNestedCallbacks],
@@ -537,17 +608,13 @@ const testRules = (assertion) => ({
   'test-standard/literal-expected': ['error', { mode: assertion }],
 });
 
-/** @type {Config['linterOptions']} */
-const LOCKED = { noInlineConfig: true, reportUnusedDisableDirectives: 'error' };
+// Unused disable directives are an error everywhere: oxlint.config.ts sets
+// options.reportUnusedDisableDirectives, which oxlint reads from the root config only.
 
-/** @type {Config[]} */
 export const testStandard = [
   {
-    name: 'test-standard/unit',
     // A *.contract.ts file in test-support defines tests shared by several test files.
     files: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/test-support/**/*.contract.ts'],
-    plugins: { 'test-standard': plugin },
-    linterOptions: LOCKED,
     rules: {
       ...testRules('assert'),
       'test-standard/allowed-imports': ['error', { mode: 'unit' }],
@@ -555,13 +622,9 @@ export const testStandard = [
   },
 ];
 
-/** @type {Config[]} */
 export const e2eStandard = [
   {
-    name: 'test-standard/e2e',
     files: ['e2e/**/*.spec.ts'],
-    plugins: { 'test-standard': plugin },
-    linterOptions: LOCKED,
     rules: {
       ...testRules('expect'),
       'test-standard/allowed-imports': ['error', { mode: 'e2e' }],
@@ -569,18 +632,10 @@ export const e2eStandard = [
   },
 ];
 
-/** @type {Config[]} */
 export const productionLimits = [
   {
-    name: 'test-standard/production-limits',
     files: ['src/**/*.ts', 'src/**/*.tsx'],
-    ignores: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/test-support/**/*.contract.ts'],
-    plugins: { 'test-standard': plugin },
-    linterOptions: { reportUnusedDisableDirectives: 'error' },
-    settings: {
-      'import-x/extensions': ['.ts', '.tsx', '.js'],
-      'import-x/parsers': { '@typescript-eslint/parser': ['.ts', '.tsx'] },
-    },
+    excludeFiles: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/test-support/**/*.contract.ts'],
     rules: {
       'test-standard/complexity': ['error', PROD_LIMITS.complexity],
       'test-standard/max-depth': ['error', PROD_LIMITS.maxDepth],
@@ -588,7 +643,9 @@ export const productionLimits = [
         'error',
         { max: PROD_LIMITS.maxLinesPerFunction, skipBlankLines: true, skipComments: true },
       ],
-      'test-standard/no-cycle': 'error',
+      // Native: oxlint resolves the TypeScript imports itself. Type-only imports do not count, as in
+      // import-x. Its message comes with a help line on how to break the cycle.
+      'import/no-cycle': 'error',
       'test-standard/import-order': [
         'error',
         {

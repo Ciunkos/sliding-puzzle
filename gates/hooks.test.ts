@@ -1,8 +1,8 @@
 // Proves the git hooks REJECT what they are meant to reject, on a throwaway clone of this repo.
 // A gate that has only ever passed proves nothing. Each case commits (or pushes) one bad change
 // and expects a refusal that names the problem; a control case shows a clean change is accepted.
-// The gate files on disk (.githooks, scripts, eslint config, package.json) are copied over the
-// clone, so uncommitted edits to the gates are what is tested.
+// The gate files on disk (.githooks, scripts, the oxlint config and lint/, package.json) are copied
+// over the clone, so uncommitted edits to the gates are what is tested.
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
@@ -26,8 +26,8 @@ const GATE_FILES = [
   '.githooks',
   'scripts',
   'gates',
-  'eslint.config.js',
-  'eslint.test-standard.js',
+  'oxlint.config.ts',
+  'lint',
   'package.json',
   'tsconfig.json',
 ];
@@ -135,7 +135,7 @@ if (!NESTED) {
     test('refuses an expected value that is computed', () => {
       const result = commit(testFile('  assert.equal(GREETING, GREETING.toLowerCase());'));
       assert.notEqual(result.status, 0);
-      assert.match(result.output, /test-standard\/literal-expected/);
+      assert.match(result.output, /test-standard\(literal-expected\)/);
     });
 
     test('refuses a type error', () => {

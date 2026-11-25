@@ -35,7 +35,7 @@ enforced by lint, a script in `scripts/` or a test in `gates/`, and their messag
 - No new dependency without a one-line reason. No `any`, no `!`, no enums, no `console` in modules.
 - Validate every edge with zod: HTTP in and out, database rows, browser storage.
 - Never read, print or commit `.env` files or secrets. No real client or people names anywhere.
-- Do not edit the gates (`eslint*.js`, `.githooks/`, `gates/`, `scripts/`, `stryker.config.json`, `.github/`) to get green. If a rule is wrong, say so and stop.
+- Do not edit the gates (`oxlint.config.ts`, `lint/`, `.githooks/`, `gates/`, `scripts/`, `stryker.config.json`, `.github/`) to get green. If a rule is wrong, say so and stop.
 - If something fails three times, stop and report what you tried.
 
 ## Done means

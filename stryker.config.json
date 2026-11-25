@@ -23,6 +23,7 @@
     ]
   },
   "coverageAnalysis": "perTest",
+  "tsconfigFile": "",
   "incremental": true,
   "incrementalFile": "reports/stryker-incremental.json",
   "reporters": ["clear-text", "progress", "html", "json"],

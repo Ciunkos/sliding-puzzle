@@ -9,8 +9,8 @@ echo "pre-commit: prettier"
 echo "$staged" | grep -E '\.(ts|tsx|js|json|md|html|css|yml)$' | xargs -r npx prettier --check
 code=$(echo "$staged" | grep -E '\.(ts|tsx|js)$' || true)
 if [ -n "$code" ]; then
-  echo "pre-commit: eslint"
-  echo "$code" | xargs npx eslint
+  echo "pre-commit: oxlint"
+  echo "$code" | xargs npx oxlint --type-aware --deny-warnings --report-unused-disable-directives-severity=error
   echo "pre-commit: typecheck"
   npx tsc --noEmit
 fi
