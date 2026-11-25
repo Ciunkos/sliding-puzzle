@@ -89,6 +89,12 @@ The Worker commands (`worker:dev`, `worker:check`, `deploy`) are in [DEPLOY.md](
 
 Scoped tests: `node --import ./scripts/tsx-hooks.js --test src/puzzle`.
 
+Lint is [oxlint](https://oxc.rs) with type information (oxlint-tsgolint). `oxlint.config.ts` lists
+every rule one by one: ESLint's recommended rules and typescript-eslint's strict and stylistic
+type-checked presets, with their options. The module boundaries and the test standard are local
+plugins in `lint/` (unit tests in `lint/rules.test.js`, gate tests in `gates/`). Types are checked
+by TypeScript 7 (`tsc`), and `scripts/tsx-hooks.js` lets Node load `.tsx` through oxc-transform.
+
 ## Architecture
 
 A modular monolith: one package, flat folders in `src/`, cut by what they do.
@@ -127,7 +133,7 @@ run of `npm run check`.
 2. Pin it in `src/server/features.ts` and `src/web/features.tsx`.
 3. `npm run check`. The deletion test now covers your folder too.
 
-### Module rules (enforced by lint, tested in `gates/boundaries.test.ts`)
+### Module rules (enforced by lint in `oxlint.config.ts`, tested in `gates/boundaries.test.ts`)
 
 - Import another module only through its `index.ts`, `server.ts` or `client.tsx`.
 - Server code never imports client code, and the reverse.
@@ -142,7 +148,7 @@ browser adopts it. Signing in is one atomic "resume" call that returns the saved
 
 ## Tests
 
-The standard is in `AGENTS.md` and is enforced by lint (`eslint.test-standard.js`), so a test that
+The standard is in `AGENTS.md` and is enforced by lint (`lint/test-standard.js`), so a test that
 breaks it cannot be committed:
 
 - A test sits next to the file it covers and reads in ten seconds: one behaviour, Given / When / Then.
